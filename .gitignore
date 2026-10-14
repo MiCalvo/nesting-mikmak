@@ -1,0 +1,49 @@
+# Bytecode y cachés de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Extensiones C
+*.so
+*.pyd
+
+# Empaquetado / distribución
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+wheels/
+*.spec
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Tests y cobertura
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Herramientas de tipado / lint
+.mypy_cache/
+.ruff_cache/
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Variables de entorno
+.env
+
+# IDEs y sistema operativo
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

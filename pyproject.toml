@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nesting2d"
+version = "0.1.0"
+description = "Nesting 2D de piezas importadas de PDF vectorial o DXF sobre planchas"
+requires-python = ">=3.11"
+dependencies = [
+    "pdfplumber>=0.11",   # MIT - lectura de PDF
+    "shapely>=2.0",       # BSD-3 - geometría
+    "ezdxf>=1.1",         # MIT - DXF
+    "spyrrow==0.9.0",     # MIT - motor de nesting (versión fijada: API 0.x)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "matplotlib>=3.8"]
+gui = ["PySide6>=6.6"]   # fase 2
+
+[tool.setuptools.packages.find]
+include = ["nesting2d*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

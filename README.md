@@ -1,44 +1,46 @@
-# nesting-mikmak
+# Nesting 2D
 
-Aplicación de escritorio de **nesting 2D**: importar siluetas, escalarlas y colocarlas de la forma más eficiente posible dentro de una plancha.
+Coloca piezas 2D (importadas de PDF vectorial o DXF) en planchas usando el
+mínimo material y exporta un DXF por plancha.
 
-> Estado: **fase de diseño y definición de alcance**. Todavía no hay código.
+Estado: **fase 1 (núcleo, por línea de comandos)**. La interfaz gráfica es la
+fase 2. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
 
-## Primer caso de uso
+## Instalación en Windows
 
-Cortar planchas de **junta de mica** (formato estándar 1000 × 1200 mm). El corte lo hace un proveedor externo, que fijará la separación mínima necesaria entre piezas.
+Necesitas Python 3.11, 3.12, 3.13 o 3.14 (64 bits). En una terminal, dentro de esta carpeta:
 
-Más adelante: fresadora CNC (router) y corte láser.
+```
+py -3.13 -m venv .venv
+.venv\Scripts\activate
+pip install -e .[dev]
+python -m pytest
+```
 
-## Alcance previsto
+Si `py` no existe, usa la ruta de tu `python.exe`. Las pruebas tardan unos 30 s
+(el motor calcula de verdad) y deben salir 16 en verde.
 
-### Entrada
-- Importar siluetas desde **PDF**, **DXF** y **DWG**.
-- Pestaña de elementos importados donde seleccionar cada pieza y ajustar su escala:
-  - cambiándola a mano, o
-  - poniendo una cota sobre la pieza y definiendo su dimensión real.
-  (Los PDF actuales están a escala 1:1, pero no se puede dar por hecho).
+## Uso
 
-### Parámetros por proyecto
-- Tamaño de la plancha.
-- Separación entre piezas.
-- Distancia al borde.
-- Rotaciones permitidas.
-- Espejo: opción configurable según el caso (en principio el material no tiene veta).
+Listar las piezas de unos PDF con sus medidas:
 
-### Nesting
-- Colocación automática optimizada.
-- Pensado para tiradas pequeñas.
-- No es requisito que el motor coloque piezas dentro de los huecos de otras.
-- Tras el cálculo, edición manual: seleccionar piezas y moverlas con el ratón o introduciendo valores.
+```
+python -m nesting2d piezas "datos_prueba\RIGCCP*.pdf"
+```
 
-### Salida
-1. **DXF** (primera versión).
-2. **PDF** de plano.
-3. **G-code** con herramienta de fresado (más adelante).
+Calcular el nesting del primer proyecto (16 juntas):
 
-## Plataforma
+```
+python -m nesting2d nest "datos_prueba\RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --plancha 1200x1000 --separacion 5 --margen 5 --tiempo 30 --salida salida
+```
 
-- Windows.
-- Python.
-- Uso propio; posible ampliación futura a otro usuario.
+En `salida\` quedan `plancha_1.dxf` (para el proveedor), `plancha_1.png`
+(para comprobarlo a ojo) y `proyecto.json`.
+
+Opciones útiles: `--rotacion 45` o `--rotacion libre`, `--lado abajo`,
+`--sin-pieza-en-pieza`, `--max-planchas 2`, `--semilla 1` (repite el mismo
+resultado), `--etiquetas` (nombres de pieza en una capa aparte del DXF),
+`--tolerancia 0.01` (unión de trazos al importar).
+
+La separación y el margen de 5 mm son provisionales hasta confirmarlos con el
+proveedor que corta la mica.

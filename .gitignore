@@ -47,3 +47,6 @@ htmlcov/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Salidas de la app (DXF, PNG, proyecto.json)
+salida/

@@ -19,6 +19,7 @@ trasladar `translation`.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import spyrrow
@@ -30,6 +31,13 @@ from .params import NestParams
 from .part_in_part import FALLBACK_ANGLES, Block, PipItem, fill_holes
 
 EPS = 1e-6
+
+# Informes de spyrrow que corresponden a una solución válida (sin solapes)
+_FEASIBLE = (spyrrow.ReportType.ExplFeas, spyrrow.ReportType.CmprFeas, spyrrow.ReportType.Final)  # tupla: ReportType no es hashable
+
+# drain() -> [(fase, largo de la tira en mm, ¿solución válida?)]; fase: "exploring",
+# "compressing" o "final" (nombres de spyrrow)
+ProgressDrain = Callable[[], list[tuple[str, float, bool]]]
 
 
 @dataclass
@@ -110,7 +118,17 @@ def _fits_strip(g: Polygon, angles, strip_h: float, length: float) -> bool:
     return False
 
 
-def nest(parts: list[Part], params: NestParams) -> Layout:
+def nest(parts: list[Part], params: NestParams,
+         on_sheet: Callable[[int, ProgressDrain], None] | None = None,
+         should_stop: Callable[[], bool] | None = None) -> Layout:
+    """Coloca las piezas en planchas.
+
+    `on_sheet(plancha, drain)` se llama antes de calcular cada plancha; `drain()`
+    se puede llamar desde OTRO hilo mientras el motor calcula y devuelve los
+    informes de progreso nuevos. `should_stop()` se consulta antes de empezar
+    cada plancha: spyrrow no permite interrumpir un cálculo en marcha, así que
+    la parada llega al acabar la plancha actual.
+    """
     layout = Layout(params=params)
     R, strip_h, length, offset = _frame(params)
     default_angles = params.angles()
@@ -156,6 +174,9 @@ def nest(parts: list[Part], params: NestParams) -> Layout:
     while any(u[1] > 0 for u in units.values()):
         if params.max_sheets is not None and sheet >= params.max_sheets:
             break
+        if should_stop is not None and should_stop():
+            layout.warnings.append("Cálculo detenido por el usuario")
+            break
         sp_items = [spyrrow.Item(uid, list(u[0].exterior.coords)[:-1], demand=u[1],
                                  allowed_orientations=shifted(u[2]))
                     for uid, u in units.items() if u[1] > 0]
@@ -163,7 +184,14 @@ def nest(parts: list[Part], params: NestParams) -> Layout:
         cfg = spyrrow.StripPackingConfig(total_computation_time=int(params.time_limit),
                                          min_items_separation=params.separation or None,
                                          seed=params.seed, num_workers=params.workers)
-        sol = inst.solve(cfg)
+        queue = None
+        if on_sheet is not None:
+            queue = spyrrow.ProgressQueue()
+
+            def drain(q=queue):
+                return [(rt.phase_name(), s.width, rt in _FEASIBLE) for rt, s in q.drain()]
+            on_sheet(sheet, drain)
+        sol = inst.solve(cfg, progress=queue)
 
         accepted = 0
         for pi in sol.placed_items:

@@ -16,8 +16,11 @@ cambiar comportamiento o alcance.
   cambies sin preguntar.
 
 ## Estado actual
-Fase 1 (núcleo sin interfaz) HECHA y probada: `python -m pytest` → 16 pruebas en verde.
-**Siguiente: fase 2, interfaz básica con PySide6** (ver "Plan por fases").
+Fases 1 (núcleo) y 2 (interfaz básica PySide6) HECHAS: `python -m pytest` → 27 pruebas
+en verde (11 de interfaz, sin pantalla; se saltan si no está PySide6).
+La interfaz solo se ha probado en Linux sin pantalla (offscreen) y con capturas;
+**falta que Mikel la pruebe en Windows**.
+**Siguiente: fase 3, edición manual con validación en vivo** (ver "Plan por fases").
 
 ## Estructura
 ```
@@ -33,7 +36,17 @@ nesting2d/
   exporters/dxf_export.py  DXF por plancha: capas CORTE, PLANCHA, ETIQUETAS (off por defecto)
   exporters/preview.py   PNG de comprobación (matplotlib, solo desarrollo)
   project.py             guardar/abrir proyecto .json (geometría en WKT)
-  cli.py                 línea de comandos: `piezas` y `nest`
+  cli.py                 línea de comandos: `gui`, `piezas` y `nest`
+  gui/app.py             arranque (QApplication + gc_guard + MainWindow)
+  gui/main_window.py     ventana: menús, importar/calcular en hilos, guardar/abrir, exportar DXF
+  gui/parts_model.py     tabla de piezas (modelo + editores de escala/cantidad/rotaciones)
+  gui/parts_tab.py       pestaña Piezas + diálogo de escala por cota
+  gui/part_view.py       vista ampliada de una pieza y herramienta de acotar
+  gui/snapping.py        enganche a centros/vértices/aristas (sin Qt, probado aparte)
+  gui/params_panel.py    pestaña Parámetros (+ ajustes de importación en QSettings)
+  gui/result_view.py     pestaña Resultado: plancha, retal libre, métricas, validación
+  gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
+  gui/gc_guard.py        recolección de basura solo en el hilo principal (ver abajo)
 tests/                   pruebas con las juntas reales de datos_prueba/
 datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vistas
 ```
@@ -57,6 +70,20 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   - hay ruedas para Windows de Python 3.11 a 3.14.
 - Importar un DXF de plancha SIN filtrar capas mete el borde de la plancha como
   pieza (regla par-impar). Al reimportar DXF propios, usar `layers=["CORTE"]`.
+- spyrrow 0.9.0, comprobado en su `__init__.pyi` y en pruebas:
+  - `ProgressQueue().drain()` se puede llamar desde otro hilo mientras `solve()`
+    calcula; `solve(cfg, progress=None)` también vale.
+  - NO hay forma de interrumpir `solve()`: "Detener" para al acabar la plancha en curso.
+  - `ReportType` no es hashable (no meterlo en un `set`); `==` e `in (tupla)` sí funcionan.
+- **Recolector de basura y hilos (PySide6)**: el GC cíclico de Python puede saltar
+  en un hilo de trabajo y destruir allí objetos de Qt de ventanas ya cerradas →
+  segmentation fault (visto en las pruebas al importar el plano A0). Por eso
+  `gui/gc_guard.install(app)` desactiva el GC automático y lo lanza con un QTimer
+  en el hilo principal. Cualquier QApplication nueva (pruebas incluidas) debe llamarlo.
+- Interfaz: Y hacia arriba en los datos; las escenas de Qt dibujan en (x, −y).
+- `Layout.stats()["free"]` = retal desde un margen más allá de la última pieza
+  hasta el borde de la plancha, a todo su ancho. `result_view.free_rect` dibuja
+  esa misma zona (hay prueba que lo vigila).
 
 ## Decisiones cerradas (de la especificación)
 - Escala 1:1 por defecto; corrección manual o acotando dos puntos/arista
@@ -77,10 +104,13 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 
 ## Plan por fases
 1. ~~Núcleo~~ (hecho).
-2. **Interfaz básica (PySide6)**: proyecto, importar, pestaña Piezas (escala,
-   acotar, cantidad), parámetros, calcular (en un hilo aparte; spyrrow libera el
-   GIL y tiene `ProgressQueue`) y ver el resultado.
-3. Edición manual con validación en vivo (`validate.check`) y deshacer.
+2. ~~Interfaz básica (PySide6)~~ (hecha): proyecto nuevo/abrir/guardar, importar
+   en un hilo, pestaña Piezas (escala, acotar con enganche, cantidad, rotaciones,
+   espejo), parámetros, calcular en un hilo con progreso y "Detener", ver el
+   resultado (varias planchas, retal libre, validación estática en rojo) y
+   exportar DXF. Planos con muchos contornos: se pregunta si importarlos con
+   cantidad 0 (la selección manual de contornos sigue siendo fase 5).
+3. **Edición manual** con validación en vivo (`validate.check`) y deshacer.
 4. PDF de taller, varias planchas en la interfaz, perfiles de material, guardar/abrir.
 5. Importador DXF probado con archivos reales, selección manual de contornos,
    ejecutable de Windows (PyInstaller u otro; comprobar que incluye spyrrow).
@@ -95,7 +125,8 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 
 ## Comandos
 ```
-python -m pytest
+python -m nesting2d gui            (o `nesting2d-gui` tras `pip install -e .[gui]`)
+python -m pytest                   (las de interfaz usan QT_QPA_PLATFORM=offscreen)
 python -m nesting2d piezas "datos_prueba/RIGCCP*.pdf"
 python -m nesting2d nest "datos_prueba/RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --salida salida
 ```

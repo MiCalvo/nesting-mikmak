@@ -3,8 +3,8 @@
 Coloca piezas 2D (importadas de PDF vectorial o DXF) en planchas usando el
 mínimo material y exporta un DXF por plancha.
 
-Estado: **fase 1 (núcleo, por línea de comandos)**. La interfaz gráfica es la
-fase 2. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
+Estado: **fase 2 (interfaz básica)**. La edición manual del resultado es la
+fase 3. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
 
 ## Instalación en Windows
 
@@ -13,14 +13,43 @@ Necesitas Python 3.11, 3.12, 3.13 o 3.14 (64 bits). En una terminal, dentro de e
 ```
 py -3.13 -m venv .venv
 .venv\Scripts\activate
-pip install -e .[dev]
+pip install -e .[dev,gui]
 python -m pytest
 ```
 
-Si `py` no existe, usa la ruta de tu `python.exe`. Las pruebas tardan unos 30 s
-(el motor calcula de verdad) y deben salir 16 en verde.
+Si `py` no existe, usa la ruta de tu `python.exe`. Las pruebas tardan alrededor
+de 1 minuto (el motor calcula de verdad) y deben salir 27 en verde.
 
-## Uso
+## Interfaz gráfica
+
+```
+python -m nesting2d gui
+```
+
+(o `nesting2d-gui`, que abre la ventana sin consola). Flujo:
+
+1. **Importar PDF/DXF…** (Ctrl+I). Cada archivo da una o varias piezas. Si un
+   archivo tiene muchos contornos (un plano con vistas, cotas y cajetín), la app
+   pregunta si importarlos con cantidad 0 para que pongas cantidad solo a los buenos.
+2. **Pestaña Piezas**: doble clic para cambiar nombre, escala, cantidad o
+   rotaciones; casilla de espejo. Para corregir la escala con una medida conocida,
+   selecciona la pieza y pulsa **Acotar: dos puntos** (engancha a centros de
+   círculo, vértices y aristas) o **Acotar: arista recta**, y escribe la medida
+   real; puedes aplicarla a todas las piezas del mismo archivo.
+3. **Pestaña Parámetros**: plancha, separación, margen, rotaciones, pieza dentro
+   de pieza, lado de compactación, tiempo y semilla.
+4. **Calcular** (F5). Se calcula en segundo plano; la barra de estado muestra la
+   plancha, la fase y el mejor largo encontrado. **Detener** para al acabar la
+   plancha en curso (el motor no se puede cortar a mitad).
+5. **Pestaña Resultado**: cada plancha con el retal libre, métricas y validación
+   (en rojo las piezas que incumplan separación o margen).
+6. **Exportar DXF…** (Ctrl+E): `plancha_1.dxf`, `plancha_2.dxf`… en la carpeta
+   que elijas. **Guardar** (Ctrl+S) crea el proyecto `.json`.
+
+Si cambias piezas o parámetros después de calcular, el resultado se marca como
+obsoleto y no se guarda en el proyecto hasta que vuelvas a calcular.
+
+## Línea de comandos
 
 Listar las piezas de unos PDF con sus medidas:
 

@@ -1,6 +1,8 @@
-"""Línea de comandos (fase 1, antes de la interfaz).
+"""Línea de comandos.
 
 Ejemplos (desde la carpeta del proyecto):
+
+  python -m nesting2d gui                      (interfaz gráfica)
 
   python -m nesting2d piezas datos_prueba/RIGCCP*.pdf
 
@@ -69,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--area-minima", type=float, default=1.0, help="área mínima de pieza, mm²")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    g = sub.add_parser("gui", help="abre la interfaz gráfica")
+    g.add_argument("proyecto", nargs="?", help="proyecto .json para abrir al arrancar")
+
     a = sub.add_parser("piezas", help="importa y lista las piezas con sus medidas")
     a.add_argument("archivos", nargs="+")
 
@@ -88,6 +93,14 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--salida", default="salida")
 
     args = ap.parse_args(argv)
+    if args.cmd == "gui":
+        try:
+            from .gui.app import main as gui_main
+        except ImportError as e:
+            print(f"No se puede abrir la interfaz ({e}). Instala PySide6: pip install -e .[gui]", file=sys.stderr)
+            return 1
+        return gui_main([sys.argv[0]] + ([args.proyecto] if args.proyecto else []))
+
     opts = ImportOptions(join_tolerance=args.tolerancia, min_area=args.area_minima)
     parts = load_parts(args.archivos, opts)
     if not parts:

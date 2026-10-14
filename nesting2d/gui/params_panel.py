@@ -1,0 +1,204 @@
+"""Pestaña Parámetros: parámetros del proyecto y ajustes generales de importación.
+
+Los parámetros del proyecto se guardan en el .json del proyecto. Los ajustes
+generales (tolerancia de unión, área mínima) son de la aplicación y se guardan
+con QSettings; se aplican a las importaciones siguientes.
+"""
+from __future__ import annotations
+
+from dataclasses import replace
+
+from PySide6.QtCore import QSettings, Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
+                               QHBoxLayout, QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget)
+
+from ..engine.params import SIDES, NestParams
+from ..importers.contours import ImportOptions
+
+ROTATION_STEPS = [("Cada 90°", 90.0), ("Cada 45°", 45.0), ("Cada 15°", 15.0), ("Libre", None)]
+
+
+def _dspin(lo, hi, dec, suffix, step=1.0) -> QDoubleSpinBox:
+    w = QDoubleSpinBox()
+    w.setRange(lo, hi)
+    w.setDecimals(dec)
+    w.setSingleStep(step)
+    w.setSuffix(suffix)
+    return w
+
+
+def _find_data(combo: QComboBox, value) -> int:
+    """Como QComboBox.findData, pero también encuentra el elemento cuyo dato es None."""
+    for i in range(combo.count()):
+        if combo.itemData(i) == value:
+            return i
+    return -1
+
+
+class ParamsPanel(QWidget):
+    # True si el cambio afecta al resultado del nesting (material y espesor no)
+    changed = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._base = NestParams()
+        self._loading = False
+
+        # --- plancha -----------------------------------------------------------
+        self.width = _dspin(1, 100000, 1, " mm", 10)
+        self.height = _dspin(1, 100000, 1, " mm", 10)
+        self.max_sheets = QSpinBox()
+        self.max_sheets.setRange(0, 999)
+        self.max_sheets.setSpecialValueText("Ilimitado")
+        self.separation = _dspin(0, 1000, 2, " mm", 0.5)
+        self.margin = _dspin(0, 1000, 2, " mm", 0.5)
+        sheet = QGroupBox("Plancha")
+        f = QFormLayout(sheet)
+        f.addRow("Ancho (X):", self.width)
+        f.addRow("Alto (Y):", self.height)
+        f.addRow("Planchas disponibles:", self.max_sheets)
+        f.addRow("Separación entre piezas:", self.separation)
+        f.addRow("Margen al borde:", self.margin)
+        note = QLabel("Separación y margen de 5 mm: provisionales hasta que los confirme el proveedor.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #8a6d00;")
+        f.addRow(note)
+
+        # --- nesting -------------------------------------------------------------
+        self.rotation = QComboBox()
+        for text, step in ROTATION_STEPS:
+            self.rotation.addItem(text, step)
+        self.part_in_part = QCheckBox("Meter piezas pequeñas en los huecos de las grandes")
+        self.side = QComboBox()
+        for s in SIDES:
+            self.side.addItem(s.capitalize(), s)
+        self.time_limit = QSpinBox()
+        self.time_limit.setRange(1, 3600)
+        self.time_limit.setSuffix(" s por plancha")
+        self.fix_seed = QCheckBox("Fijar")
+        self.seed = QSpinBox()
+        self.seed.setRange(0, 2 ** 31 - 1)
+        seed_row = QHBoxLayout()
+        seed_row.addWidget(self.fix_seed)
+        seed_row.addWidget(self.seed, 1)
+        nest_box = QGroupBox("Nesting")
+        f = QFormLayout(nest_box)
+        f.addRow("Rotaciones permitidas:", self.rotation)
+        f.addRow("Pieza dentro de pieza:", self.part_in_part)
+        f.addRow("Compactar hacia:", self.side)
+        f.addRow("Tiempo de cálculo:", self.time_limit)
+        f.addRow("Semilla (avanzado):", seed_row)
+        hint = QLabel("Con la semilla fijada, el mismo proyecto da siempre el mismo resultado.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray;")
+        f.addRow(hint)
+
+        # --- material (informativo) ---------------------------------------------
+        self.material = QLineEdit()
+        self.thickness = QLineEdit()
+        mat = QGroupBox("Material (informativo)")
+        f = QFormLayout(mat)
+        f.addRow("Material:", self.material)
+        f.addRow("Espesor:", self.thickness)
+
+        # --- ajustes generales de importación ------------------------------------
+        self.tolerance = _dspin(0, 10, 3, " mm", 0.005)
+        self.min_area = _dspin(0, 1e6, 2, " mm²", 0.5)
+        imp = QGroupBox("Ajustes generales de importación (de la aplicación, no del proyecto)")
+        f = QFormLayout(imp)
+        f.addRow("Tolerancia de unión de trazos:", self.tolerance)
+        f.addRow("Área mínima de contorno:", self.min_area)
+        imp_hint = QLabel("Se aplican a las importaciones siguientes; no cambian piezas ya importadas.")
+        imp_hint.setStyleSheet("color: gray;")
+        f.addRow(imp_hint)
+
+        cols = QHBoxLayout()
+        left, right = QVBoxLayout(), QVBoxLayout()
+        left.addWidget(sheet)
+        left.addWidget(mat)
+        left.addStretch(1)
+        right.addWidget(nest_box)
+        right.addWidget(imp)
+        right.addStretch(1)
+        cols.addLayout(left, 1)
+        cols.addLayout(right, 1)
+        outer = QVBoxLayout(self)
+        outer.addLayout(cols)
+
+        self.set_params(NestParams())
+        self._load_settings()
+
+        for w in (self.width, self.height, self.separation, self.margin):
+            w.valueChanged.connect(lambda *_: self._emit(True))
+        for w in (self.max_sheets, self.time_limit, self.seed):
+            w.valueChanged.connect(lambda *_: self._emit(True))
+        for w in (self.rotation, self.side):
+            w.currentIndexChanged.connect(lambda *_: self._emit(True))
+        self.part_in_part.toggled.connect(lambda *_: self._emit(True))
+        self.fix_seed.toggled.connect(self._seed_toggled)
+        for w in (self.material, self.thickness):
+            w.textEdited.connect(lambda *_: self._emit(False))
+        self.tolerance.valueChanged.connect(self._save_settings)
+        self.min_area.valueChanged.connect(self._save_settings)
+
+    def _seed_toggled(self, on: bool):
+        self.seed.setEnabled(on)
+        self._emit(True)
+
+    def _emit(self, affects: bool):
+        if not self._loading:
+            self.changed.emit(affects)
+
+    # --- parámetros del proyecto ----------------------------------------------------
+    def params(self) -> NestParams:
+        return replace(
+            self._base,
+            sheet_width=self.width.value(), sheet_height=self.height.value(),
+            max_sheets=self.max_sheets.value() or None,
+            separation=self.separation.value(), margin=self.margin.value(),
+            rotation_step=self.rotation.currentData(),
+            part_in_part=self.part_in_part.isChecked(),
+            compact_side=self.side.currentData(),
+            time_limit=self.time_limit.value(),
+            seed=self.seed.value() if self.fix_seed.isChecked() else None,
+            material=self.material.text(), thickness=self.thickness.text())
+
+    def set_params(self, p: NestParams) -> None:
+        self._loading = True
+        try:
+            self._base = p
+            self.width.setValue(p.sheet_width)
+            self.height.setValue(p.sheet_height)
+            self.max_sheets.setValue(p.max_sheets or 0)
+            self.separation.setValue(p.separation)
+            self.margin.setValue(p.margin)
+            i = _find_data(self.rotation, p.rotation_step)
+            if i < 0:  # paso no estándar (p. ej. puesto desde la línea de comandos)
+                self.rotation.addItem(f"Cada {p.rotation_step:g}°", p.rotation_step)
+                i = self.rotation.count() - 1
+            self.rotation.setCurrentIndex(i)
+            self.part_in_part.setChecked(p.part_in_part)
+            self.side.setCurrentIndex(max(0, _find_data(self.side, p.compact_side)))
+            self.time_limit.setValue(int(p.time_limit))
+            self.fix_seed.setChecked(p.seed is not None)
+            self.seed.setValue(p.seed or 0)
+            self.seed.setEnabled(p.seed is not None)
+            self.material.setText(p.material)
+            self.thickness.setText(p.thickness)
+        finally:
+            self._loading = False
+
+    # --- ajustes generales ------------------------------------------------------------
+    def import_options(self) -> ImportOptions:
+        return ImportOptions(join_tolerance=self.tolerance.value(), min_area=self.min_area.value())
+
+    def _load_settings(self):
+        d = ImportOptions()
+        s = QSettings()
+        self.tolerance.setValue(float(s.value("import/join_tolerance", d.join_tolerance)))
+        self.min_area.setValue(float(s.value("import/min_area", d.min_area)))
+
+    def _save_settings(self, *_):
+        s = QSettings()
+        s.setValue("import/join_tolerance", self.tolerance.value())
+        s.setValue("import/min_area", self.min_area.value())

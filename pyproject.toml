@@ -16,7 +16,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "matplotlib>=3.8"]
-gui = ["PySide6>=6.6"]   # fase 2
+gui = ["PySide6>=6.6"]   # LGPL - interfaz
+
+[project.gui-scripts]
+nesting2d-gui = "nesting2d.gui.app:main"
 
 [tool.setuptools.packages.find]
 include = ["nesting2d*"]

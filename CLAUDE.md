@@ -73,6 +73,7 @@ nesting2d/
   gui/contour_dialog.py  selección manual de contornos ("lo azul es la pieza") por zonas o por
                          aristas (cadena, Ctrl, Mayús = mismo Ø, Taladros…), y capas DXF
   gui/image_dialog.py    el mismo diálogo para imágenes: tipo, umbral, escala (ppp o medir)
+tools/medir_motor.py     medición del motor (tiempo, semillas, rotaciones, copias)
 packaging/               PyInstaller: nesting2d.spec, lanzadores, construir_windows.bat
 .github/workflows/windows.yml  pruebas + ejecutable + autoprueba en Windows en cada push
 tests/                   pruebas con las juntas reales de datos_prueba/
@@ -161,6 +162,14 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   - plano A0 pág. 2: 3.789 trazos clasificados en < 1 s; el anillo de Ø340 con
     el agujero de Ø220 y 15 taladros sale con 1 clic + «Taladros…»;
   - empates al pinchar (recta que toca un círculo): se prefiere círculo/arco.
+- Motor medido (15/10/2026, `docs/medicion_motor.md`, 4 núcleos, juntas reales):
+  pedido real de 16 copias = 189 mm SIEMPRE (tope geométrico, ya a los 5 s, con
+  cualquier rotación); 48 copias: −0,7 % de largo por cada vez que se dobla el
+  tiempo hasta 120 s, nada de 120 a 240; más orientaciones necesitan más tiempo
+  (45° ≈ ×2, 15°/libre ≈ ×3) y con estas piezas 90° gana a igual tiempo; varios
+  intentos cortos rinden MENOS que uno largo. `StripPackingConfig`: si se dan
+  `exploration_time` y `compression_time`, hay que pasar `total_computation_time=None`
+  (su valor por defecto es 600 y da error).
 - Arcos para el DXF: empezar el recorrido del anillo al principio del segmento
   más largo (si no, un arco queda partido al cerrar) y parar los tramos rectos
   donde empieza un arco (si no, se comen su primer punto). Con eso las esquinas

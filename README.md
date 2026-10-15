@@ -23,8 +23,13 @@ de 1 minuto (el motor calcula de verdad) y deben salir 27 en verde.
 
 Sin instalar Python: en GitHub, pestaña **Actions** → la última ejecución de
 «Windows» en verde → **Artifacts** → `Nesting2D-windows` (hay que haber iniciado
-sesión en GitHub). Es un único .zip: descomprímelo y abre `Nesting2D\Nesting2D.exe`
-(no lo saques de su carpeta: necesita `_internal`).
+sesión en GitHub). Es un único .zip: clic derecho → «Extraer todo…» en una
+carpeta tuya (por ejemplo Documentos; en `C:\` o `Program Files` Windows pide
+permisos de administrador) y abre `Nesting2D\Nesting2D.exe` (no lo saques de su
+carpeta: necesita `_internal`). No hace falta instalar nada: los ajustes y perfiles
+se guardan en tu carpeta de usuario (AppData). Como el .exe no está firmado,
+Windows puede avisar («Windows protegió su PC»): «Más información» → «Ejecutar de
+todas formas».
 `nesting2d-cli.exe autoprueba` comprueba que todo funciona.
 
 Para construirlo tú: `packaging\construir_windows.bat` (deja el resultado en

@@ -73,6 +73,25 @@ def page_polylines(page, opts: ImportOptions):
     return out
 
 
+def pdf_page_polylines(file: str | Path, opts: ImportOptions | None = None,
+                       pages: list[int] | None = None) -> tuple[dict[int, list], list[str]]:
+    """Trazos (en mm) de cada página con trazos vectoriales, y avisos de las que no tienen."""
+    opts = opts or ImportOptions()
+    file = Path(file)
+    out, warnings = {}, []
+    with pdfplumber.open(file) as pdf:
+        for i, page in enumerate(pdf.pages, start=1):
+            if pages and i not in pages:
+                continue
+            pls = page_polylines(page, opts)
+            if pls:
+                out[i] = pls
+            else:
+                kind = "imágenes" if page.images else "ningún trazo"
+                warnings.append(f"{file.name} pág. {i}: sin trazos vectoriales ({kind}); ¿PDF escaneado?")
+    return out, warnings
+
+
 def import_pdf(file: str | Path, opts: ImportOptions | None = None, pages: list[int] | None = None) -> ImportResult:
     """Importa todas las piezas de un PDF vectorial.
 

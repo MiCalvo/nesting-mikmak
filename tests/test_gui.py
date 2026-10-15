@@ -13,7 +13,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QEventLoop, QPoint, QSettings, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
-from shapely.geometry import box  # noqa: E402
+from shapely.geometry import Polygon, box  # noqa: E402
 
 from nesting2d import project  # noqa: E402
 from nesting2d.engine.nester import nest  # noqa: E402
@@ -461,3 +461,125 @@ def test_recent_files(qapp, window, tmp_path):
     f = tmp_path / "r.json"
     assert w._save_to(f)
     assert w._recent()[0] == str(f.resolve())
+
+
+# --- fase 5: selección manual de contornos y capas DXF --------------------------------
+def _framed_dxf(path):
+    import ezdxf
+    doc = ezdxf.new("R2010")
+    doc.units = 4  # mm
+    msp = doc.modelspace()
+    msp.add_lwpolyline([(0, 0), (400, 0), (400, 300), (0, 300)], close=True, dxfattribs={"layer": "MARCO"})
+    msp.add_lwpolyline([(50, 50), (150, 50), (150, 110), (50, 110)], close=True, dxfattribs={"layer": "CORTE"})
+    msp.add_circle((100, 80), 10, dxfattribs={"layer": "CORTE"})
+    msp.add_lwpolyline([(200, 50), (260, 50), (260, 90), (200, 90)], close=True, dxfattribs={"layer": "CORTE"})
+    doc.saveas(path)
+    return path
+
+
+def test_contour_dialog_builds_parts_ignoring_frame(qapp, tmp_path):
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    f = _framed_dxf(tmp_path / "plano.dxf")
+    dlg = ContourDialog(str(f), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    assert len(dlg.faces[1]) == 4               # marco, placa, taladro, placa pequeña
+    # ventana alrededor de la primera placa: entran placa y taladro, pero el taladro
+    # queda como hueco (par-impar entre lo de dentro de la ventana)
+    dlg._band(40, 40, 160, 120, True, False)
+    assert len(dlg.selected) == 1
+    dlg.create_part()
+    # clic dentro de la placa pequeña, y luego otra vez para quitarla y volver a ponerla
+    dlg._clicked(230, 70)
+    dlg._clicked(230, 70)
+    assert dlg.selected == set()
+    dlg._clicked(230, 70)
+    dlg.create_part()
+    parts = dlg.result_parts()
+    assert [p.size for p in parts] == [pytest.approx((100, 60)), pytest.approx((60, 40))]
+    assert len(parts[0].shape.interiors) == 1    # el taladro es hueco; el marco no cuenta
+    # deshacer la segunda pieza libera sus contornos
+    dlg.list.setCurrentRow(1)
+    dlg._delete_part()
+    assert len(dlg.result_parts()) == 1
+    dlg.reject()
+
+
+def test_contour_dialog_click_selects_innermost(qapp, tmp_path):
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    f = _framed_dxf(tmp_path / "plano.dxf")
+    dlg = ContourDialog(str(f), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    faces = dlg.faces[1]
+    dlg._clicked(100, 80)                        # dentro del taladro
+    (i,) = dlg.selected
+    assert faces[i].area == pytest.approx(3.1416 * 100, rel=0.01)
+    # placa + taladro marcados a mano como material: el taladro deja de ser hueco
+    dlg._clicked(60, 60)
+    dlg.create_part()
+    (p,) = dlg.result_parts()
+    assert p.size == pytest.approx((100, 60)) and len(p.shape.interiors) == 0
+    dlg.reject()
+
+
+def test_contour_dialog_several_pieces_keep_largest(qapp, tmp_path):
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    f = _framed_dxf(tmp_path / "plano.dxf")
+    dlg = ContourDialog(str(f), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    dlg._confirm_many = lambda n: "largest"
+    dlg._band(40, 40, 270, 120, True, False)     # las dos placas
+    dlg.create_part()
+    (p,) = dlg.result_parts()
+    assert p.size == pytest.approx((100, 60))
+    dlg.reject()
+
+
+def test_dxf_import_asks_layers_and_defaults_to_corte(qapp, window, monkeypatch, tmp_path):
+    from nesting2d.gui.contour_dialog import LayerDialog
+    w = window
+    f = _framed_dxf(tmp_path / "plano.dxf")
+    seen = {}
+
+    def fake_exec(dlg):
+        seen["layers"] = dlg.layers()
+        return LayerDialog.DialogCode.Accepted
+    monkeypatch.setattr(LayerDialog, "exec", fake_exec)
+    monkeypatch.setattr(w, "_ask_multi_qty", lambda name, n: 1)
+    w.import_files([str(f)])
+    wait_until(qapp, lambda: w.import_worker is None)
+    assert seen["layers"] == ["CORTE"]
+    assert sorted(p.size for p in w.model.parts) == [pytest.approx((60, 40)), pytest.approx((100, 60))]
+
+
+def test_contour_dialog_shift_click_fixes_all_counterbores(qapp, tmp_path):
+    """Taladros dibujados con dos circunferencias (avellanado): la ventana deja un
+    islote dentro de cada uno. Para cortar el taladro pasante, las coronas son
+    material y los islotes hueco: dos Mayús+clic los arreglan todos."""
+    import ezdxf
+
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    doc = ezdxf.new("R2010")
+    doc.units = 4
+    msp = doc.modelspace()
+    msp.add_lwpolyline([(0, 0), (120, 0), (120, 40), (0, 40)], close=True)
+    for x in (20, 60, 100):
+        msp.add_circle((x, 20), 8)     # avellanado
+        msp.add_circle((x, 20), 4)     # taladro pasante
+    doc.saveas(tmp_path / "av.dxf")
+    dlg = ContourDialog(str(tmp_path / "av.dxf"), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    dlg._band(-5, -5, 125, 45, True, False)
+    assert len(dlg.selected) == 4                 # placa + 3 islotes
+    dlg._clicked(26, 20, True)                    # Mayús+clic en una corona: las 3 pasan a material
+    assert len(dlg.selected) == 7
+    dlg._clicked(20, 20, True)                    # Mayús+clic en un islote: los 3 quedan como hueco
+    assert len(dlg.selected) == 4
+    dlg.create_part()
+    (p,) = dlg.result_parts()
+    assert len(p.shape.interiors) == 3
+    assert all(abs(Polygon(r).area - 3.1416 * 16) < 1 for r in p.shape.interiors)   # huecos de Ø8
+    dlg.reject()

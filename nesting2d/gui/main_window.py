@@ -19,6 +19,7 @@ from ..engine.params import NestParams
 from ..exporters.dxf_export import export_sheet
 from ..exporters.shop_pdf import export_shop_pdf
 from ..validate import check_layout
+from .contour_dialog import ContourDialog, LayerDialog
 from .params_panel import ParamsPanel
 from .parts_model import PartsModel
 from .parts_tab import PartsTab
@@ -115,6 +116,8 @@ class MainWindow(QMainWindow):
         self.a_save = self._act("&Guardar", self.save_project, K.Save)
         self.a_save_as = self._act("Guardar &como…", self.save_project_as, K.SaveAs)
         self.a_import = self._act("&Importar PDF/DXF…", self.import_files, "Ctrl+I")
+        self.a_import_manual = self._act("Importar &seleccionando contornos…", self.import_manual, "Ctrl+Shift+I",
+                                         "Para planos con varias vistas, cotas o cajetín")
         self.a_export = self._act("&Exportar DXF…", self.export_dxf, "Ctrl+E",
                                   "Un DXF por plancha (capas CORTE y PLANCHA)")
         self.a_pdf = self._act("Exportar &PDF de taller…", self.export_pdf, "Ctrl+P",
@@ -132,7 +135,7 @@ class MainWindow(QMainWindow):
             m.addAction(a)
         self.recent_menu = m.addMenu("Abrir &reciente")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
-        for a in (self.a_save, self.a_save_as, None, self.a_import, None,
+        for a in (self.a_save, self.a_save_as, None, self.a_import, self.a_import_manual, None,
                   self.a_export, self.a_labels, self.a_pdf, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = self.menuBar().addMenu("&Editar")
@@ -166,6 +169,7 @@ class MainWindow(QMainWindow):
         self.a_nest.setEnabled(not running)
         self.a_stop.setEnabled(running)
         self.a_import.setEnabled(not importing)
+        self.a_import_manual.setEnabled(not importing)
         has_result = self.layout_ is not None and self.layout_.sheets > 0
         self.a_export.setEnabled(has_result)
         self.a_pdf.setEnabled(has_result)
@@ -363,7 +367,16 @@ class MainWindow(QMainWindow):
         if not files:
             return
         self._remember_dir(Path(files[0]))
-        self.import_worker = ImportWorker(list(files), self.params_panel.import_options(), self)
+        layers = {}
+        for f in files:
+            if f.lower().endswith(".dxf"):
+                chosen = self._ask_dxf_layers(f)
+                if chosen is False:
+                    return
+                if chosen is not None:
+                    layers[f] = chosen
+        self._import_layers = layers
+        self.import_worker = ImportWorker(list(files), self.params_panel.import_options(), self, layers=layers)
         self.import_worker.done.connect(self._import_done)
         self.import_worker.failed.connect(self._import_failed)
         self.import_worker.finished.connect(self._import_finished)
@@ -388,7 +401,7 @@ class MainWindow(QMainWindow):
     def _import_done(self, results, warnings):
         for w in warnings:
             self.log("AVISO: " + w)
-        added = []
+        added = 0
         for file, parts in results:
             name = Path(file).name
             if not parts:
@@ -399,22 +412,67 @@ class MainWindow(QMainWindow):
                 if qty is None:
                     self.log(f"{name}: no se importa ({len(parts)} contornos).")
                     continue
-            original = [p.name for p in parts]
-            for p in parts:
-                p.quantity = qty
-            self.model.add_parts(parts)
-            renamed = [(a, p.name) for a, p in zip(original, parts) if a != p.name]
-            for a, b in renamed:
-                self.log(f"{name}: ya había una pieza «{a}»; la nueva se llama «{b}».")
-            self.log(f"{name}: {len(parts)} pieza(s) importadas con cantidad {qty}.")
-            added.extend(parts)
-        if added:
-            self.tabs.setCurrentWidget(self.parts_tab)
-            self.parts_tab.select_row(next(i for i, p in enumerate(self.model.parts) if p is added[0]))
+                if qty == "manual":
+                    dlg = ContourDialog(file, self.params_panel.import_options(),
+                                        getattr(self, "_import_layers", {}).get(file), self)
+                    if dlg.exec() == ContourDialog.DialogCode.Accepted:
+                        manual = dlg.result_parts()
+                        self._add_imported(name, manual, 1)
+                        added += len(manual)
+                    continue
+            self._add_imported(name, parts, qty)
+            added += len(parts)
         if warnings and not added:
             QMessageBox.information(self, APP_NAME, "\n".join(warnings))
 
-    def _ask_multi_qty(self, name: str, n: int) -> int | None:
+    def _ask_dxf_layers(self, file: str):
+        """Capas a importar de un DXF: lista, None (todas, o una sola capa) o False (cancelar)."""
+        from ..importers.dxf_import import dxf_layers
+        try:
+            layers = dxf_layers(file)
+        except Exception as e:   # archivo dañado: ya lo dirá el importador
+            self.log(f"AVISO: no se pudieron leer las capas de {Path(file).name}: {e}")
+            return None
+        if len(layers) <= 1:
+            return None
+        dlg = LayerDialog(Path(file).name, dict(layers), self)
+        if dlg.exec() != LayerDialog.DialogCode.Accepted:
+            return False
+        return dlg.layers()
+
+    def import_manual(self, file: str | None = None):
+        """Importar eligiendo a mano qué contornos forman cada pieza."""
+        if not file:
+            file, _ = QFileDialog.getOpenFileName(self, "Importar seleccionando contornos", self._last_dir(),
+                                                  "Planos (*.pdf *.dxf);;Todos (*)")
+        if not file:
+            return
+        self._remember_dir(Path(file))
+        layers = None
+        if file.lower().endswith(".dxf"):
+            layers = self._ask_dxf_layers(file)
+            if layers is False:
+                return
+        dlg = ContourDialog(file, self.params_panel.import_options(), layers, self)
+        if dlg.exec() != ContourDialog.DialogCode.Accepted:
+            return
+        self._add_imported(Path(file).name, dlg.result_parts(), 1)
+
+    def _add_imported(self, name: str, parts, qty: int):
+        if not parts:
+            return
+        original = [p.name for p in parts]
+        for p in parts:
+            p.quantity = qty
+        self.model.add_parts(parts)
+        for a, p in zip(original, parts):
+            if a != p.name:
+                self.log(f"{name}: ya había una pieza «{a}»; la nueva se llama «{p.name}».")
+        self.log(f"{name}: {len(parts)} pieza(s) importadas con cantidad {qty}.")
+        self.tabs.setCurrentWidget(self.parts_tab)
+        self.parts_tab.select_row(next(i for i, q in enumerate(self.model.parts) if q is parts[0]))
+
+    def _ask_multi_qty(self, name: str, n: int):
         box = QMessageBox(self)
         box.setWindowTitle(APP_NAME)
         box.setIcon(QMessageBox.Icon.Question)
@@ -422,9 +480,11 @@ class MainWindow(QMainWindow):
         box.setInformativeText(
             "Si es un plano con varias vistas, cotas o cajetín, muchos serán contornos falsos (marco, "
             "letras…). La selección manual de contornos llegará más adelante; de momento puedes "
-            "importarlos con cantidad 0, poner cantidad solo a los que quieras cortar y borrar el resto.")
+            "importarlos con cantidad 0 y poner cantidad solo a los buenos, o elegir a mano qué "
+            "contornos forman cada pieza.")
         b0 = box.addButton("Cantidad 0 (elegir después)", QMessageBox.ButtonRole.AcceptRole)
         b1 = box.addButton("Cantidad 1 a todos", QMessageBox.ButtonRole.AcceptRole)
+        bm = box.addButton("Seleccionar contornos a mano…", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("No importar", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(b0)
         box.exec()
@@ -432,6 +492,8 @@ class MainWindow(QMainWindow):
             return 0
         if box.clickedButton() is b1:
             return 1
+        if box.clickedButton() is bm:
+            return "manual"
         return None
 
     # --- nesting -------------------------------------------------------------------

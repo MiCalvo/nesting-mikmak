@@ -35,10 +35,12 @@ class ImportWorker(QThread):
     done = Signal(object, object)
     failed = Signal(str)
 
-    def __init__(self, files: list[str], opts: ImportOptions, parent=None):
+    def __init__(self, files: list[str], opts: ImportOptions, parent=None,
+                 layers: dict[str, list[str]] | None = None):
         super().__init__(parent)
         self.files = files
         self.opts = opts
+        self.layers = layers or {}     # archivo DXF -> capas a importar (si no está: todas)
 
     def run(self):
         results, warnings = [], []
@@ -49,7 +51,7 @@ class ImportWorker(QThread):
                 if ext == ".pdf":
                     res = import_pdf(path, self.opts)
                 elif ext == ".dxf":
-                    res = import_dxf(path, self.opts)
+                    res = import_dxf(path, self.opts, layers=self.layers.get(f))
                     warnings.append(f"{path.name}: el importador DXF aún no se ha probado con DXF "
                                     "reales de CAD; revisa medidas y contornos.")
                 elif ext == ".dwg":

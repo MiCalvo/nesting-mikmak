@@ -63,18 +63,24 @@ def snap_endpoints(polylines: list[list[tuple[float, float]]], tol: float) -> li
     return out
 
 
-def build_parts(polylines: list[list[tuple[float, float]]], opts: ImportOptions) -> list[Polygon]:
-    """Convierte trazos sueltos en piezas (polígonos con huecos), de mayor a menor área."""
+def closed_faces(polylines: list[list[tuple[float, float]]], opts: ImportOptions) -> list[Polygon]:
+    """Pasos 1 y 2: une extremos, noda los trazos y devuelve las caras cerradas
+    mínimas (cada región que encierran los trazos). Los trazos abiertos no forman caras."""
     polylines = snap_endpoints(polylines, opts.join_tolerance)
     lines = [LineString(pl) for pl in polylines if len(pl) >= 2]
     lines = [ln for ln in lines if ln.length > 0]
     if not lines:
         return []
+    return [f for f in polygonize(unary_union(lines)) if f.area > 1e-9]
 
-    faces = [f for f in polygonize(unary_union(lines)) if f.area > 1e-9]
+
+def parts_from_faces(faces: list[Polygon], min_area: float = 0.0) -> list[Polygon]:
+    """Pasos 3 y 4: regla par-impar entre las caras dadas y unión de las de material.
+
+    Sirve también para la selección manual de contornos: con solo las caras que
+    elige el usuario, el marco o el cajetín no cuentan al decidir qué es hueco."""
     if not faces:
         return []
-
     shells = [Polygon(f.exterior) for f in faces]
     tree = STRtree(shells)
     material = []
@@ -92,6 +98,11 @@ def build_parts(polylines: list[list[tuple[float, float]]], opts: ImportOptions)
     else:
         parts = [g for g in getattr(merged, "geoms", []) if isinstance(g, Polygon)]
 
-    parts = [p for p in parts if p.area >= opts.min_area]
+    parts = [p for p in parts if not p.is_empty and p.area >= min_area]
     parts.sort(key=lambda p: -p.area)
     return parts
+
+
+def build_parts(polylines: list[list[tuple[float, float]]], opts: ImportOptions) -> list[Polygon]:
+    """Convierte trazos sueltos en piezas (polígonos con huecos), de mayor a menor área."""
+    return parts_from_faces(closed_faces(polylines, opts), opts.min_area)

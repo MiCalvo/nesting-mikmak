@@ -97,7 +97,11 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   hasta el borde de la plancha, a todo su ancho. `nester.free_rect` da esa misma
   zona como rectángulo (la usan la vista y el PDF; hay prueba que lo vigila).
 - PDF de taller: librería elegida = QPdfWriter (viene con PySide6; sin dependencia
-  nueva). Necesita una QGuiApplication: `shop_pdf` la crea si no existe. Al extraer
+  nueva). Necesita una QGuiApplication: `shop_pdf` la crea si no existe.
+  **En Windows, la plataforma Qt "offscreen" no tiene fuentes**: el PDF sale sin
+  texto (comprobado en Actions: plataforma "windows" → 157 fuentes y texto bien;
+  "offscreen" → 0 fuentes). Por eso conftest.py solo fuerza offscreen fuera de
+  Windows y `shop_pdf` lanza un error si Qt no encuentra fuentes. Al extraer
   texto con pdfplumber, los ":" salen como un carácter raro (mapeo de la fuente);
   en las pruebas no se comparan textos con ":".
 - Pruebas de interfaz: `QStandardPaths.setTestModeEnabled(True)` para no tocar
@@ -166,7 +170,7 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 python -m nesting2d gui            (o `nesting2d-gui` tras `pip install -e .[gui]`)
 python -m nesting2d autoprueba
 pyinstaller --noconfirm packaging/nesting2d.spec   (o packaging\construir_windows.bat)
-python -m pytest                   (las de interfaz usan QT_QPA_PLATFORM=offscreen)
+python -m pytest                   (interfaz: offscreen en Linux; plataforma normal en Windows)
 python -m nesting2d piezas "datos_prueba/RIGCCP*.pdf"
 python -m nesting2d nest "datos_prueba/RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --salida salida
 ```

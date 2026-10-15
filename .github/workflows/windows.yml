@@ -26,23 +26,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .[dev,gui] pyinstaller
 
-      - name: Diagnóstico temporal del texto del PDF
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          python packaging/diagnostico_pdf.py diag-windows.pdf
-          $env:QT_QPA_PLATFORM = "offscreen"
-          python packaging/diagnostico_pdf.py diag-offscreen.pdf
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: diagnostico-pdf
-          path: diag-*.pdf
-          retention-days: 3
-
+      # Sin QT_QPA_PLATFORM=offscreen: en Windows esa plataforma no tiene fuentes
+      # (el PDF de taller saldría sin texto). Las ventanas de prueba se abren en el
+      # escritorio del ejecutor.
       - name: Pruebas
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q
 
       - name: Construir ejecutable

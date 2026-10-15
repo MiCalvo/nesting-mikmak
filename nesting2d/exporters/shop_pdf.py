@@ -35,6 +35,11 @@ def _ensure_qt_app():
     from PySide6.QtGui import QGuiApplication
     if QCoreApplication.instance() is None:
         _ensure_qt_app.app = QGuiApplication([])   # se guarda para que no se destruya
+    from PySide6.QtGui import QFontDatabase
+    if not QFontDatabase.families():
+        # visto en Windows con QT_QPA_PLATFORM=offscreen: el PDF saldría sin ningún texto
+        raise RuntimeError("Qt no encuentra ninguna fuente (¿plataforma 'offscreen' en Windows?); "
+                           "el PDF de taller saldría sin texto.")
 
 
 def choose_scale(w: float, h: float, avail_w: float, avail_h: float) -> int:

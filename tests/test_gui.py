@@ -1,4 +1,4 @@
-"""Pruebas de la interfaz (fase 2), sin pantalla (QT_QPA_PLATFORM=offscreen).
+"""Pruebas de la interfaz (la plataforma Qt la decide conftest.py).
 
 Se saltan si PySide6 no está instalado (pip install -e .[gui]).
 """
@@ -7,7 +7,6 @@ import time
 
 import pytest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QEventLoop, QPoint, QSettings, Qt  # noqa: E402

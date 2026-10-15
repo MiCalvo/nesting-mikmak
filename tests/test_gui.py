@@ -582,3 +582,70 @@ def test_contour_dialog_shift_click_fixes_all_counterbores(qapp, tmp_path):
     assert len(p.shape.interiors) == 3
     assert all(abs(Polygon(r).area - 3.1416 * 16) < 1 for r in p.shape.interiors)   # huecos de Ø8
     dlg.reject()
+
+
+# --- imágenes (capturas y escaneos) ---------------------------------------------------
+def _png(tmp_path, name="captura.png", dpi=None):
+    pytest.importorskip("cv2")
+    from PIL import Image
+
+    from tests.test_image import drawing
+    path = tmp_path / name
+    Image.fromarray(drawing()).save(path, **({"dpi": (dpi, dpi)} if dpi else {}))
+    return path
+
+
+def test_image_dialog_scan_with_dpi(qapp, tmp_path):
+    from nesting2d.gui.image_dialog import ImageContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    dlg = ImageContourDialog(str(_png(tmp_path, "escaneo.png", 300)), ImportOptions())
+    assert dlg.mode.currentData() == "lineas"
+    assert dlg.mm_per_px() == pytest.approx(25.4 / 300, rel=1e-3)
+    assert len(dlg.faces[1]) == 2
+    dlg._band(0, 0, 1400, 1000, True, False)    # ventana a toda la imagen (píxeles)
+    dlg.create_part()
+    (p,) = dlg.result_parts()
+    assert p.size == pytest.approx((100, 60), abs=0.15)
+    assert len(p.shape.interiors) == 1
+    dlg.reject()
+
+
+def test_image_dialog_screenshot_needs_scale(qapp, tmp_path):
+    from nesting2d.gui.image_dialog import ImageContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    dlg = ImageContourDialog(str(_png(tmp_path)), ImportOptions())
+    assert dlg.mm_per_px() == 0
+    dlg._band(0, 0, 1400, 1000, True, False)
+    assert not dlg.b_create.isEnabled()          # sin escala no se crean piezas
+    dlg.create_part()
+    assert dlg.result_parts() == []
+    # medir el lado largo de la placa: 100 mm son 1181,1 px a 300 ppp
+    dlg.set_scale_from_measure(100 / (25.4 / 300), 100.0)
+    assert "medida" in dlg.scale_info.text()
+    assert dlg.b_create.isEnabled()
+    dlg.create_part()
+    (p,) = dlg.result_parts()
+    assert p.size == pytest.approx((100, 60), abs=0.15)
+    # cambiar el umbral recalcula las zonas pero conserva las piezas creadas
+    dlg.threshold.setValue(100)
+    dlg.recompute()
+    assert len(dlg.result_parts()) == 1
+    dlg.scale_spin.setValue(0.1)
+    assert "a mano" in dlg.scale_info.text()
+    dlg.reject()
+
+
+def test_window_imports_image_through_dialog(qapp, window, monkeypatch, tmp_path):
+    from nesting2d.gui.image_dialog import ImageContourDialog
+    w = window
+
+    def fake_exec(dlg):
+        dlg._band(0, 0, 1400, 1000, True, False)
+        dlg.create_part()
+        return ImageContourDialog.DialogCode.Accepted
+    monkeypatch.setattr(ImageContourDialog, "exec", fake_exec)
+    w.import_files([str(_png(tmp_path, "plano.png", 300))])
+    assert w.import_worker is None               # las imágenes no pasan por el hilo de importación
+    (p,) = w.model.parts
+    assert p.name == "plano_1" and p.quantity == 1
+    assert p.size == pytest.approx((100, 60), abs=0.15)

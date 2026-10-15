@@ -19,7 +19,9 @@ from ..engine.params import NestParams
 from ..exporters.dxf_export import export_sheet
 from ..exporters.shop_pdf import export_shop_pdf
 from ..validate import check_layout
+from ..importers.image_import import is_image
 from .contour_dialog import ContourDialog, LayerDialog
+from .image_dialog import ImageContourDialog
 from .params_panel import ParamsPanel
 from .parts_model import PartsModel
 from .parts_tab import PartsTab
@@ -28,6 +30,8 @@ from .result_view import ResultPanel
 from .workers import ImportWorker, NestWorker
 
 APP_NAME = "Nesting 2D"
+IMPORT_FILTER = ("Planos e imágenes (*.pdf *.dxf *.dwg *.png *.jpg *.jpeg *.bmp *.tif *.tiff);;"
+                 "PDF (*.pdf);;DXF (*.dxf);;Imágenes (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;Todos (*)")
 MAX_RECENT = 8
 PHASES = {"exploring": "explorando", "compressing": "compactando", "final": "terminando"}
 
@@ -115,7 +119,7 @@ class MainWindow(QMainWindow):
         self.a_open = self._act("&Abrir proyecto…", self.open_project_dialog, K.Open)
         self.a_save = self._act("&Guardar", self.save_project, K.Save)
         self.a_save_as = self._act("Guardar &como…", self.save_project_as, K.SaveAs)
-        self.a_import = self._act("&Importar PDF/DXF…", self.import_files, "Ctrl+I")
+        self.a_import = self._act("&Importar PDF/DXF/imagen…", self.import_files, "Ctrl+I")
         self.a_import_manual = self._act("Importar &seleccionando contornos…", self.import_manual, "Ctrl+Shift+I",
                                          "Para planos con varias vistas, cotas o cajetín")
         self.a_export = self._act("&Exportar DXF…", self.export_dxf, "Ctrl+E",
@@ -363,10 +367,17 @@ class MainWindow(QMainWindow):
         if not files:
             files, _ = QFileDialog.getOpenFileNames(
                 self, "Importar piezas", self._last_dir(),
-                "Planos (*.pdf *.dxf *.dwg);;PDF (*.pdf);;DXF (*.dxf);;Todos (*)")
+                IMPORT_FILTER)
         if not files:
             return
         self._remember_dir(Path(files[0]))
+        # las imágenes necesitan elegir contornos y escala: siempre con el diálogo
+        images = [f for f in files if is_image(f)]
+        files = [f for f in files if not is_image(f)]
+        for img in images:
+            self.import_image(img)
+        if not files:
+            return
         layers = {}
         for f in files:
             if f.lower().endswith(".dxf"):
@@ -444,10 +455,13 @@ class MainWindow(QMainWindow):
         """Importar eligiendo a mano qué contornos forman cada pieza."""
         if not file:
             file, _ = QFileDialog.getOpenFileName(self, "Importar seleccionando contornos", self._last_dir(),
-                                                  "Planos (*.pdf *.dxf);;Todos (*)")
+                                                  IMPORT_FILTER)
         if not file:
             return
         self._remember_dir(Path(file))
+        if is_image(file):
+            self.import_image(file)
+            return
         layers = None
         if file.lower().endswith(".dxf"):
             layers = self._ask_dxf_layers(file)
@@ -457,6 +471,21 @@ class MainWindow(QMainWindow):
         if dlg.exec() != ContourDialog.DialogCode.Accepted:
             return
         self._add_imported(Path(file).name, dlg.result_parts(), 1)
+
+    def import_image(self, file: str):
+        """Captura de pantalla o escaneo: elegir tipo, umbral, escala y contornos."""
+        try:
+            dlg = ImageContourDialog(file, self.params_panel.import_options(), self)
+        except Exception as e:   # imagen dañada o formato que Pillow no lee
+            self._warn(f"No se pudo abrir la imagen {Path(file).name}: {e}")
+            return
+        if dlg.exec() != ImageContourDialog.DialogCode.Accepted:
+            return
+        parts = dlg.result_parts()
+        self._add_imported(Path(file).name, parts, 1)
+        if parts:
+            self.log(f"{Path(file).name}: escala {fmt(dlg.mm_per_px(), 5)} mm/px "
+                     f"(precisión ≈ ±{fmt(dlg.mm_per_px(), 2)} mm). Comprueba las medidas en la pestaña Piezas.")
 
     def _add_imported(self, name: str, parts, qty: int):
         if not parts:

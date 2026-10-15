@@ -83,6 +83,17 @@ def run(report: str | Path | None = None) -> int:
             log(f"PDF: reimportado con pdfplumber, {len(res.parts)} contornos")
             ok &= len(res.parts) > 0
 
+        import cv2
+        import numpy as np
+
+        from .importers.image_import import RasterImage, image_faces
+        img = np.full((400, 600), 255, np.uint8)
+        cv2.rectangle(img, (100, 100), (500, 300), 0, 2)
+        cv2.circle(img, (300, 200), 50, 0, 2)
+        faces, _, _ = image_faces(RasterImage(img, 300), "lineas")
+        log(f"Imagen (OpenCV {cv2.__version__}): {len(faces)} zonas cerradas")
+        ok &= len(faces) == 2
+
         from PySide6 import __version__ as pyside_version
         log(f"PySide6 {pyside_version}")
     except Exception:

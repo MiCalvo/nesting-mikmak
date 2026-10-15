@@ -47,6 +47,10 @@ def load_parts(patterns: list[str], opts: ImportOptions) -> list[Part]:
             res = import_pdf(f, opts)
         elif ext == ".dxf":
             res = import_dxf(f, opts)
+        elif ext in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
+            print(f"AVISO {f.name}: las imágenes necesitan elegir contornos y escala; "
+                  "impórtalas desde la interfaz (python -m nesting2d gui).", file=sys.stderr)
+            continue
         elif ext == ".dwg":
             print(f"AVISO {f.name}: DWG no se lee directamente. Conviértelo a DXF "
                   "(ODA File Converter o LibreDWG).", file=sys.stderr)

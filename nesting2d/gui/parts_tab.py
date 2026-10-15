@@ -83,7 +83,7 @@ class PartsTab(QWidget):
         for col, width in widths.items():
             self.table.setColumnWidth(col, width)
 
-        b_import = QPushButton("Importar PDF/DXF…")
+        b_import = QPushButton("Importar PDF/DXF/imagen…")
         b_import.clicked.connect(self.import_requested)
         self.b_delete = QPushButton("Eliminar")
         self.b_delete.clicked.connect(self.delete_selected)
@@ -198,7 +198,7 @@ class PartsTab(QWidget):
             self.info.setText(f"{len(rows)} piezas seleccionadas.")
         else:
             self.info.setText("Selecciona una pieza para verla ampliada." if parts else
-                              "No hay piezas. Pulsa «Importar PDF/DXF…» (Ctrl+I).")
+                              "No hay piezas. Pulsa «Importar PDF/DXF/imagen…» (Ctrl+I).")
 
     # --- acciones ------------------------------------------------------------------
     def delete_selected(self):

@@ -52,6 +52,11 @@ python -m nesting2d gui
    huecos), un clic cambia una zona de hueco a material o al revés, y
    Mayús+clic hace ese cambio en todas las zonas iguales (por ejemplo, todos
    los taladros).
+   **Imágenes** (capturas de pantalla y escaneos: PNG, JPG, BMP, TIFF): se abre
+   ese mismo diálogo con el tipo de imagen (dibujo de líneas o silueta), el
+   umbral de blanco y negro y la **escala**, que es obligatoria: sale sola de
+   los ppp de un escaneo, o se mide en la imagen una distancia conocida
+   («Medir en la imagen…»). La precisión depende de la resolución (≈ ±1 píxel).
 2. **Pestaña Piezas**: doble clic para cambiar nombre, escala, cantidad o
    rotaciones; casilla de espejo. Para corregir la escala con una medida conocida,
    selecciona la pieza y pulsa **Acotar: dos puntos** (engancha a centros de

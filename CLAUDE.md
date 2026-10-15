@@ -16,10 +16,10 @@ cambiar comportamiento o alcance.
   cambies sin preguntar.
 
 ## Estado actual
-Fases 1 a 5 HECHAS (la 2 validada por Mikel; 3, 4 y 5 probadas en Linux sin
-pantalla, con capturas, y en Windows solo por GitHub Actions). `python -m pytest`
-→ todas en verde (las de interfaz, sin pantalla; se saltan si no está PySide6).
-Pendiente: que Mikel pruebe 3–5 en Windows y pase DXF reales de su CAD.
+Fases 1 a 5 HECHAS y probadas por Mikel en Windows ("parece que funciona bien").
+Fase 6 (imágenes: capturas y escaneos con OpenCV) HECHA, sin probar aún por Mikel.
+`python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
+no está PySide6). Pendiente: DXF reales de su CAD.
 
 ## Estructura
 ```
@@ -27,6 +27,8 @@ nesting2d/
   geometry.py            Part (pieza: forma original + escala, cantidad, rotaciones, espejo)
   importers/contours.py  trazos sueltos -> piezas con huecos (unión de extremos + regla par-impar)
   importers/pdf_import.py  PDF vectorial (pdfplumber)
+  importers/image_import.py  imágenes (Pillow + OpenCV): modos líneas/silueta/silueta clara,
+                         umbral Otsu, caras en píxeles con Y hacia arriba
   importers/dxf_import.py  DXF (ezdxf): bloques anidados/MINSERT, capa 0 heredada, capas
                          — probado con DXF sintéticos; FALTAN DXF reales del CAD
   engine/params.py       NestParams (parámetros de proyecto)
@@ -57,6 +59,7 @@ nesting2d/
   gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
   gui/gc_guard.py        recolección de basura solo en el hilo principal (ver abajo)
   gui/contour_dialog.py  selección manual de contornos ("lo azul es la pieza") y capas DXF
+  gui/image_dialog.py    el mismo diálogo para imágenes: tipo, umbral, escala (ppp o medir)
 packaging/               PyInstaller: nesting2d.spec, lanzadores, construir_windows.bat
 .github/workflows/windows.yml  pruebas + ejecutable + autoprueba en Windows en cada push
 tests/                   pruebas con las juntas reales de datos_prueba/
@@ -113,6 +116,18 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   zona y Mayús+clic todas las zonas iguales. Visto con el plano RIG23P0054.
 - `build_parts` = `closed_faces` + `parts_from_faces`; el diálogo usa las caras.
 - DXF: los bloques anidados se perdían (0 piezas) hasta la fase 5; hay prueba.
+- Imágenes (OpenCV 5.0.0 instalado; API igual que 4.x en lo que usamos, comprobado):
+  - se leen con Pillow (ppp y transparencia; evita cv2.imread con rutas no ASCII);
+  - ppp < 150 = de pantalla, no se usan como escala; la escala es obligatoria;
+  - modo líneas: caras = zonas claras cerradas (las que tocan el borde de la imagen
+    son el fondo y se descartan), ampliadas 0,5 px + medio trazo (grosor estimado
+    con la transformada de distancia) hasta el eje de la línea; siluetas: +0,5 px
+    las componentes, −0,5 px los huecos;
+  - precisión medida con imágenes sintéticas a 300 ppp: ±0,1 mm; con el PDF de la
+    RIGCCP0016 pasado a imagen de 200 ppp: 123,98 × 72,67 mm y 11 huecos (vectorial:
+    124,0 × 72,7);
+  - Otsu se adapta a líneas grises suavizadas (167–219); un umbral fijo de 128 las
+    pierde. En imágenes de dos tonos puros Otsu da 0, y da igual.
 - Ejecutable: PyInstaller en modo carpeta (dist/Nesting2D: Nesting2D.exe ventana +
   nesting2d-cli.exe consola). Construido y probado en Linux (≈300 MB; la
   autoprueba pasa con spyrrow empaquetado). En Windows lo construye Actions.
@@ -156,6 +171,8 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 5. ~~Ampliaciones~~ (hechas, salvo DXF reales): importador DXF reforzado (bloques
    anidados, MINSERT, capa 0, aviso de pulgadas, elegir capas); selección manual
    de contornos; ejecutable de Windows con PyInstaller y autoprueba.
+6. ~~Imágenes~~ (hecha, 15/10/2026, a petición de Mikel): capturas de pantalla y
+   escaneos con OpenCV; fotos con perspectiva, por ahora no.
 
 ## Pendientes abiertos
 - Separación y margen reales: los dirá el proveedor de la mica.

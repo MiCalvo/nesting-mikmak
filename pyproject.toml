@@ -12,6 +12,7 @@ dependencies = [
     "shapely>=2.0",       # BSD-3 - geometría
     "ezdxf>=1.1",         # MIT - DXF
     "spyrrow==0.9.0",     # MIT - motor de nesting (versión fijada: API 0.x)
+    "opencv-python-headless>=4.8,<6",  # Apache 2.0 - vectorizar capturas y escaneos (probado con 5.0)
 ]
 
 [project.optional-dependencies]

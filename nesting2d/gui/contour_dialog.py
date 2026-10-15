@@ -74,6 +74,7 @@ class FacesWorker(QThread):
 class FacesView(QGraphicsView):
     clicked = Signal(float, float, bool)                  # punto en mm, ¿Mayús?
     band = Signal(float, float, float, float, bool, bool)  # x0, y0, x1, y1, ventana, quitar
+    measured = Signal(float)                              # distancia entre dos clics (modo medir)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,6 +85,20 @@ class FacesView(QGraphicsView):
         self._press = None
         self._end = None
         self._pan = None
+        self.measuring = False      # modo medir: dos clics -> `measured`
+        self._measure_pts: list[tuple[float, float]] = []
+        self._cursor = None
+
+    def start_measure(self):
+        self.measuring = True
+        self._measure_pts = []
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def stop_measure(self):
+        self.measuring = False
+        self._measure_pts = []
+        self.unsetCursor()
+        self.viewport().update()
 
     def fit(self):
         if not self.scene().sceneRect().isEmpty():
@@ -111,6 +126,10 @@ class FacesView(QGraphicsView):
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - int(d.x()))
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - int(d.y()))
             return
+        if self.measuring:
+            self._cursor = self._mm(e.position().toPoint())
+            self.viewport().update()
+            return
         if self._press is not None:
             self._end = self._mm(e.position().toPoint())
             self.viewport().update()
@@ -120,6 +139,17 @@ class FacesView(QGraphicsView):
             self._pan = None
             return
         if self._press is None:
+            return
+        if self.measuring:
+            self._press = self._end = None
+            self._measure_pts.append(self._mm(e.position().toPoint()))
+            if len(self._measure_pts) == 2:
+                (ax, ay), (bx, by) = self._measure_pts
+                self.stop_measure()
+                d = ((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5
+                if d > 0:
+                    self.measured.emit(d)
+            self.viewport().update()
             return
         (x0, y0), (x1, y1) = self._press, self._mm(e.position().toPoint())
         self._press = self._end = None
@@ -132,6 +162,12 @@ class FacesView(QGraphicsView):
             self.band.emit(x0, y0, x1, y1, x1 >= x0, remove)
 
     def drawForeground(self, painter, rect):
+        if self.measuring and self._measure_pts:
+            a = self._measure_pts[0]
+            b = self._cursor or a
+            painter.setPen(_pen("#d00000", 1.5, Qt.PenStyle.DashLine))
+            painter.drawLine(QPointF(a[0], -a[1]), QPointF(b[0], -b[1]))
+            return
         if self._press is None or self._end is None:
             return
         (x0, y0), (x1, y1) = self._press, self._end
@@ -145,7 +181,12 @@ class FacesView(QGraphicsView):
 class ContourDialog(QDialog):
     """Devuelve en `parts` las piezas creadas a mano."""
 
-    def __init__(self, file: str, opts: ImportOptions, layers: list[str] | None = None, parent=None):
+    # tolerancias de "zonas iguales" (Mayús+clic): en mm para PDF/DXF; las imágenes las cambian
+    twin_tol = 0.05
+    twin_area_rel = 0.002
+
+    def __init__(self, file: str, opts: ImportOptions, layers: list[str] | None = None, parent=None,
+                 load: bool = True):
         super().__init__(parent)
         self.setWindowTitle(f"Seleccionar contornos — {Path(file).name}")
         self.resize(1250, 820)
@@ -209,22 +250,34 @@ class ContourDialog(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
+        self.extra_bar = QHBoxLayout()      # controles propios de cada tipo de archivo
         lay = QVBoxLayout(self)
         lay.addLayout(top)
+        lay.addLayout(self.extra_bar)
         lay.addWidget(split, 1)
         lay.addWidget(self.buttons)
         self._update_buttons()
 
-        self.worker = FacesWorker(file, opts, layers, self)
-        self.worker.done.connect(self._loaded)
-        self.worker.failed.connect(lambda tb: (self.info.setText("Error al leer el archivo."),
-                                              QMessageBox.warning(self, "Error", tb)))
-        self.worker.start()
+        self.worker = None
+        if load:
+            self.worker = FacesWorker(file, opts, layers, self)
+            self.worker.done.connect(self._loaded)
+            self.worker.failed.connect(lambda tb: (self.info.setText("Error al leer el archivo."),
+                                                  QMessageBox.warning(self, "Error", tb)))
+            self.worker.start()
 
     def done(self, r):
-        if self.worker.isRunning():
+        if self.worker is not None and self.worker.isRunning():
             self.worker.wait()
         super().done(r)
+
+    # --- ganchos para otros tipos de archivo (imágenes) ------------------------------
+    def _ready_to_create(self) -> bool:
+        return True
+
+    def _finalize_poly(self, poly: Polygon) -> Polygon:
+        """Pasa una pieza de las unidades de las caras a mm (en PDF/DXF ya son mm)."""
+        return poly
 
     # --- carga -----------------------------------------------------------------
     def _loaded(self, faces, warnings):
@@ -306,9 +359,10 @@ class ContourDialog(QDialog):
         else:
             self._set_selection(self.selected | twins)
 
-    def _twins(self, i: int, tol: float = 0.05) -> set[int]:
+    def _twins(self, i: int, tol: float | None = None) -> set[int]:
         """Caras con la misma forma y tamaño que la i (área, medidas y nº de huecos), en
         cualquier posición; admite giros de 90° (ancho y alto intercambiados)."""
+        tol = self.twin_tol if tol is None else tol
         faces = self.faces[self.page]
         f = faces[i]
         w, h = f.bounds[2] - f.bounds[0], f.bounds[3] - f.bounds[1]
@@ -316,7 +370,7 @@ class ContourDialog(QDialog):
         for j, g in enumerate(faces):
             gw, gh = g.bounds[2] - g.bounds[0], g.bounds[3] - g.bounds[1]
             dims = (abs(gw - w) <= tol and abs(gh - h) <= tol) or (abs(gw - h) <= tol and abs(gh - w) <= tol)
-            if dims and abs(g.area - f.area) <= max(tol, 0.002 * f.area) and len(g.interiors) == len(f.interiors):
+            if dims and abs(g.area - f.area) <= max(tol, self.twin_area_rel * f.area) and len(g.interiors) == len(f.interiors):
                 out.add(j)
         return out
 
@@ -356,7 +410,7 @@ class ContourDialog(QDialog):
         return f"{base}_{k}"
 
     def create_part(self):
-        if not self.selected:
+        if not self.selected or not self._ready_to_create():
             return
         faces = self.faces[self.page]
         merged = unary_union([faces[i] for i in sorted(self.selected)])
@@ -373,7 +427,7 @@ class ContourDialog(QDialog):
         group = len(self.parts)   # las piezas de una misma selección se deshacen juntas
         for poly in polys:
             name = self._next_name()
-            self.parts.append(Part(name=name, shape=poly, source=str(self.file), page=self.page,
+            self.parts.append(Part(name=name, shape=self._finalize_poly(poly), source=str(self.file), page=self.page,
                                    extra={"faces": sorted(self.selected), "group": group}))
             item = QListWidgetItem(f"{name}")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -439,7 +493,7 @@ class ContourDialog(QDialog):
                 for p in self.parts if p is not None]
 
     def _update_buttons(self):
-        self.b_create.setEnabled(bool(self.selected))
+        self.b_create.setEnabled(bool(self.selected) and self._ready_to_create())
         n = len([p for p in self.parts if p is not None])
         ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setText(f"Importar {n} pieza(s)")

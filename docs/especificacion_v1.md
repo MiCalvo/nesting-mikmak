@@ -18,6 +18,7 @@ La v1 cubre el flujo completo, desde el PDF hasta el DXF de corte, con edición 
 **v1**
 
 - Importar PDF vectorial (también multipágina) y DXF.
+- Importar imágenes: capturas de pantalla y escaneos (PNG, JPG, BMP, TIFF), vectorizando con OpenCV (ampliación del 15/10/2026).
 - Reconstruir automáticamente contornos y huecos.
 - Seleccionar a mano los contornos en planos con varias vistas.
 - Pestaña Piezas: escala manual o por acotado, cantidad, y rotación y espejo por pieza.
@@ -39,7 +40,8 @@ La v1 cubre el flujo completo, desde el PDF hasta el DXF de corte, con edición 
 
 - G-code o CAM para fresado; posible más adelante.
 - Lectura nativa de DWG: se convierte antes a DXF con ODA File Converter o LibreDWG.
-- PDF escaneado (imagen): exigiría vectorizar.
+- Fotos con perspectiva (exigirían corregirla, p. ej. con un folio A4 de referencia): por ahora no.
+- PDF escaneado: no se lee directamente; se puede exportar la página a imagen e importarla como imagen.
 - Vinilo de rollo.
 
 ## Flujo de trabajo
@@ -72,6 +74,16 @@ El importador convierte los trazos sueltos de un PDF o DXF en piezas cerradas, c
 **DXF**
 
 - Se lee con ezdxf. **Aún no probado con archivos reales de CAD**; hay que comprobar unidades, arcos y polilíneas.
+
+**Imágenes (capturas de pantalla y escaneos)**
+
+Acordado el 15/10/2026: capturas y escaneos sí; fotos con perspectiva, por ahora no.
+
+- Se abre siempre el diálogo de selección de contornos, con tres tipos de imagen: dibujo de líneas (captura de un plano: las líneas son bordes y el contorno se lleva al centro del trazo), silueta oscura sobre fondo claro y silueta clara sobre fondo oscuro.
+- Umbral de blanco y negro automático (Otsu) o a mano, con vista previa; la imagen se ve debajo de las zonas.
+- **Escala obligatoria** antes de crear piezas: de los ppp del archivo si es un escaneo (≥ 150 ppp; por debajo suelen ser los de la pantalla) o midiendo en la imagen una distancia conocida.
+- Precisión limitada por la resolución, del orden de ±1 píxel (a 300 ppp, ±0,1 mm aprox.). Para piezas que deben encajar, mejor el plano vectorial.
+- Librería: OpenCV (Apache 2.0). Lectura con Pillow (ya venía con pdfplumber), que da los ppp.
 
 **DWG**
 
@@ -177,6 +189,8 @@ Python 3.11–3.14 (ruedas de spyrrow para Windows disponibles), interfaz PySide
 | shapely 2.x | Geometría | BSD-3 (comprobado) |
 | ezdxf | DXF | MIT (sin comprobar) |
 | spyrrow 0.9.0 | Motor de nesting | MIT (comprobado) |
+| OpenCV (opencv-python-headless) | Vectorizar imágenes | Apache 2.0 (comprobado en el paquete) |
+| Pillow | Leer imágenes (viene con pdfplumber) | MIT-CMU (comprobado en el paquete) |
 | sparrow / jagua-rs | Núcleo del motor | MIT / MPL-2.0 |
 
 Ejecutable de Windows: PyInstaller u otro; por probar que incluya el módulo compilado de spyrrow.
@@ -220,3 +234,4 @@ Nesting en plancha 1200 × 1000 mm, margen 5 mm, 30 s:
 3. **Edición manual**: mover, girar, validación en vivo, métricas y deshacer.
 4. **Producción**: PDF de taller, varias planchas en la interfaz, perfiles de material, guardar y abrir proyectos.
 5. **Ampliaciones**: importador DXF con archivos reales, selección manual de contornos, ejecutable de Windows.
+6. **Imágenes** (añadida el 15/10/2026): capturas de pantalla y escaneos con OpenCV.

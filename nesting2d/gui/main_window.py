@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         self.parts_tab = PartsTab(self.model)
         self.params_panel = ParamsPanel()
         self.result_panel = ResultPanel()
+        self.result_panel.parts_fn = lambda: self.model.parts
         self.tabs = QTabWidget()
         self.tabs.addTab(self.parts_tab, "Piezas")
         self.tabs.addTab(self.params_panel, "Parámetros")
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
         self.parts_tab.hint.connect(self.status.setText)
         self.parts_tab.message.connect(self.log)
         self.params_panel.changed.connect(self._on_params_changed)
+        self.result_panel.edited.connect(self._set_modified)
 
         self.timer = QTimer(self)
         self.timer.setInterval(300)
@@ -124,6 +126,16 @@ class MainWindow(QMainWindow):
         for a in (self.a_new, self.a_open, self.a_save, self.a_save_as, None, self.a_import,
                   self.a_export, self.a_labels, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
+        m = self.menuBar().addMenu("&Editar")
+        self.a_undo = self.result_panel.undo.createUndoAction(self, "&Deshacer")
+        self.a_undo.setShortcut(K.Undo)
+        self.a_redo = self.result_panel.undo.createRedoAction(self, "&Rehacer")
+        self.a_redo.setShortcut(K.Redo)
+        self.a_revert = self._act("&Volver al resultado del motor", self.result_panel.revert_to_engine)
+        m.addAction(self.a_undo)
+        m.addAction(self.a_redo)
+        m.addSeparator()
+        m.addAction(self.a_revert)
         m = self.menuBar().addMenu("&Nesting")
         m.addAction(self.a_nest)
         m.addAction(self.a_stop)
@@ -175,16 +187,17 @@ class MainWindow(QMainWindow):
     def _on_parts_edited(self):
         self._set_modified()
         self._mark_stale()
+        self.result_panel.refresh_warnings()   # las rotaciones permitidas pueden haber cambiado
 
     def _on_params_changed(self, affects_layout: bool):
         self._set_modified()
         if affects_layout:
             self._mark_stale()
 
-    def _set_layout(self, layout: Layout | None, issues=None, stale=False):
+    def _set_layout(self, layout: Layout | None, issues=None, stale=False, engine: Layout | None = None):
         self.layout_ = layout
         self.result_stale = stale
-        self.result_panel.set_layout(layout, issues)
+        self.result_panel.set_layout(layout, issues, engine)
         self.result_panel.set_stale(stale)
         self._update_actions()
 
@@ -220,13 +233,14 @@ class MainWindow(QMainWindow):
     def open_project(self, path: str | Path) -> bool:
         path = Path(path)
         try:
-            parts, params, layout = project.load(path)
+            data = project.load_project(path)
         except Exception as e:  # archivo dañado o de otra cosa
             self._warn(f"No se pudo abrir {path.name}: {e}")
             return False
+        parts, params, layout = data.parts, data.params, data.layout
         self.model.set_parts(parts)
         self.params_panel.set_params(params)
-        self._set_layout(layout, check_layout(layout) if layout else None)
+        self._set_layout(layout, check_layout(layout) if layout else None, engine=data.engine_layout)
         self.project_path = path
         self._remember_dir(path)
         self._set_modified(False)
@@ -251,7 +265,8 @@ class MainWindow(QMainWindow):
     def _save_to(self, path: Path) -> bool:
         layout = None if self.result_stale else self.layout_
         try:
-            project.save(path, self.model.parts, self.params_panel.params(), layout)
+            project.save(path, self.model.parts, self.params_panel.params(), layout,
+                         engine_layout=self.result_panel.engine)
         except OSError as e:
             self._warn(f"No se pudo guardar {path}: {e}")
             return False

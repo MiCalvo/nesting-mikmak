@@ -250,3 +250,126 @@ def test_import_multiview_drawing_with_quantity_zero(qapp, window, monkeypatch):
     assert len(parts) > 10
     assert all(p.quantity == 0 for p in parts)
     assert len({p.name for p in parts}) == len(parts)
+
+
+# --- fase 3: edición manual del resultado ---------------------------------------------
+def _boxes_layout():
+    from nesting2d.engine.nester import Layout, Placement
+    params = NestParams(sheet_width=300, sheet_height=200, separation=5, margin=5)
+    return Layout(params, [Placement("a", 0, 0.0, box(10, 10, 50, 40)),
+                           Placement("b", 0, 0.0, box(100, 10, 140, 40))], sheets=1)
+
+
+def _mouse(view, kind, x, y, mods=Qt.KeyboardModifier.NoModifier, button=Qt.MouseButton.LeftButton):
+    from PySide6.QtCore import QPointF
+    p = QPointF(view.mapFromScene(x, -y))
+    ev = QMouseEvent(kind, p, p, button, button, mods)
+    {QMouseEvent.Type.MouseButtonPress: view.mousePressEvent,
+     QMouseEvent.Type.MouseMove: view.mouseMoveEvent,
+     QMouseEvent.Type.MouseButtonRelease: view.mouseReleaseEvent}[kind](ev)
+
+
+def _key(view, key, mods=Qt.KeyboardModifier.NoModifier):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    view.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, key, mods))
+
+
+def test_manual_editing(qapp, window, tmp_path):
+    P = QMouseEvent.Type
+    w = window
+    w.model.set_parts([Part("a", box(0, 0, 40, 30)), Part("b", box(0, 0, 40, 30))])
+    w._set_layout(_boxes_layout(), None)
+    w.tabs.setCurrentWidget(w.result_panel)
+    qapp.processEvents()
+    rp, view = w.result_panel, w.result_panel.view
+    L = w.layout_
+    rp.snap.setChecked(False)
+    tol = view.px_to_mm(1.5)     # el arrastre va en píxeles enteros
+
+    # clic selecciona; arrastrar mueve
+    _mouse(view, P.MouseButtonPress, 30, 25)
+    assert view.selection == {0}
+    _mouse(view, P.MouseMove, 50, 25)
+    _mouse(view, P.MouseButtonRelease, 50, 25)
+    assert L.placements[0].polygon.bounds[0] == pytest.approx(30, abs=tol)
+    x_after_drag = L.placements[0].polygon.bounds[0]
+
+    # flechas: 1 mm, y 10 mm con Mayús
+    _key(view, Qt.Key.Key_Right)
+    _key(view, Qt.Key.Key_Up, Qt.KeyboardModifier.ShiftModifier)
+    b = L.placements[0].polygon.bounds
+    assert b[0] == pytest.approx(x_after_drag + 1) and b[1] == pytest.approx(20)
+
+    # girar con R (paso del proyecto, 90°)
+    _key(view, Qt.Key.Key_R)
+    assert L.placements[0].angle == 90
+
+    # deshacer todo y rehacer uno
+    for _ in range(4):
+        rp.undo.undo()
+    assert L.placements[0].polygon.bounds == pytest.approx((10, 10, 50, 40))
+    rp.undo.redo()
+    assert L.placements[0].polygon.bounds[0] == pytest.approx(x_after_drag)
+
+    # panel numérico absoluto: esquina inferior izquierda a (200, 100)
+    rp.ex.setValue(200)
+    rp.ey.setValue(100)
+    rp._apply_fields()
+    assert L.placements[0].polygon.bounds[:2] == pytest.approx((200, 100))
+    # relativo: +20 en X
+    rp.mode_rel.setChecked(True)
+    rp.ex.setValue(20)
+    rp._apply_fields()
+    assert L.placements[0].polygon.bounds[0] == pytest.approx(220)
+    rp.mode_abs.setChecked(True)
+
+    # validación en vivo: encima de b -> en rojo
+    view.set_selection({0})
+    rp.ex.setValue(110)
+    rp.ey.setValue(15)
+    rp._apply_fields()
+    assert any(i.kind == "solape" for i in rp.issues)
+    assert 0 in view.bad and rp.problems.count() >= 1
+
+    # volver al resultado del motor
+    rp.revert_to_engine()
+    assert L.placements[0].polygon.bounds == pytest.approx((10, 10, 50, 40))
+    assert rp.issues == []
+
+    # ventana de selección (izquierda -> derecha): solo piezas enteras dentro
+    _mouse(view, P.MouseButtonPress, 5, 5)
+    _mouse(view, P.MouseMove, 60, 45)
+    _mouse(view, P.MouseButtonRelease, 60, 45)
+    assert view.selection == {0}
+    # de derecha a izquierda: las que toca
+    _mouse(view, P.MouseButtonPress, 120, 45)
+    _mouse(view, P.MouseMove, 40, 30)
+    _mouse(view, P.MouseButtonRelease, 40, 30)
+    assert view.selection == {0, 1}
+
+    # guardar con ediciones y resultado del motor, y volver a abrir
+    rp.undo.undo()   # deshace "volver al motor": queda la pieza encima de b
+    f = tmp_path / "e.json"
+    assert w._save_to(f)
+    w.modified = False
+    assert w.open_project(f)
+    assert w.layout_.placements[0].polygon.bounds[:2] == pytest.approx((110, 15))
+    w.result_panel.revert_to_engine()
+    assert w.layout_.placements[0].polygon.bounds == pytest.approx((10, 10, 50, 40))
+
+
+def test_drag_snaps_to_neighbour_separation(qapp, window):
+    P = QMouseEvent.Type
+    w = window
+    w._set_layout(_boxes_layout(), None)
+    w.tabs.setCurrentWidget(w.result_panel)
+    qapp.processEvents()
+    view, L = w.result_panel.view, w.layout_
+    assert w.result_panel.snap.isChecked()
+    # b (100..140) arrastrada hacia a (10..50) hasta casi tocar la separación de 5 mm
+    _mouse(view, P.MouseButtonPress, 120, 25)
+    _mouse(view, P.MouseMove, 120 - 44, 25)
+    _mouse(view, P.MouseButtonRelease, 120 - 44, 25)
+    assert L.placements[1].polygon.bounds[0] == pytest.approx(55)    # 50 + 5
+    assert w.result_panel.issues == []

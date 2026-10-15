@@ -16,11 +16,10 @@ cambiar comportamiento o alcance.
   cambies sin preguntar.
 
 ## Estado actual
-Fases 1 (núcleo) y 2 (interfaz básica PySide6) HECHAS: `python -m pytest` → 27 pruebas
-en verde (11 de interfaz, sin pantalla; se saltan si no está PySide6).
-La interfaz solo se ha probado en Linux sin pantalla (offscreen) y con capturas;
-**falta que Mikel la pruebe en Windows**.
-**Siguiente: fase 3, edición manual con validación en vivo** (ver "Plan por fases").
+Fases 1 (núcleo), 2 (interfaz básica, validada por Mikel) y 3 (edición manual) HECHAS.
+`python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
+no está PySide6). La fase 3 solo se ha probado en Linux sin pantalla y con capturas.
+**Siguiente: fase 4** (ver "Plan por fases").
 
 ## Estructura
 ```
@@ -35,7 +34,10 @@ nesting2d/
   validate.py            solapes, separación, margen (lo usará la edición manual)
   exporters/dxf_export.py  DXF por plancha: capas CORTE, PLANCHA, ETIQUETAS (off por defecto)
   exporters/preview.py   PNG de comprobación (matplotlib, solo desarrollo)
-  project.py             guardar/abrir proyecto .json (geometría en WKT)
+  project.py             guardar/abrir proyecto .json (geometría en WKT); v2 guarda también
+                         el resultado del motor para "volver" a él
+  editing.py             edición manual sin Qt: mover, girar, enganche, cambiar de plancha,
+                         avisos de giro no permitido (devuelve cambios; la GUI los deshace)
   cli.py                 línea de comandos: `gui`, `piezas` y `nest`
   gui/app.py             arranque (QApplication + gc_guard + MainWindow)
   gui/main_window.py     ventana: menús, importar/calcular en hilos, guardar/abrir, exportar DXF
@@ -44,7 +46,8 @@ nesting2d/
   gui/part_view.py       vista ampliada de una pieza y herramienta de acotar
   gui/snapping.py        enganche a centros/vértices/aristas (sin Qt, probado aparte)
   gui/params_panel.py    pestaña Parámetros (+ ajustes de importación en QSettings)
-  gui/result_view.py     pestaña Resultado: plancha, retal libre, métricas, validación
+  gui/result_view.py     pestaña Resultado y editor: selección (clic/ventana CAD), arrastre
+                         con enganche, flechas, panel X/Y/ángulo, QUndoStack, validación en vivo
   gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
   gui/gc_guard.py        recolección de basura solo en el hilo principal (ver abajo)
 tests/                   pruebas con las juntas reales de datos_prueba/
@@ -110,7 +113,13 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
    resultado (varias planchas, retal libre, validación estática en rojo) y
    exportar DXF. Planos con muchos contornos: se pregunta si importarlos con
    cantidad 0 (la selección manual de contornos sigue siendo fase 5).
-3. **Edición manual** con validación en vivo (`validate.check`) y deshacer.
+3. ~~Edición manual~~ (hecha): selección por clic, Ctrl+clic y ventana (→ dentro,
+   ← tocando); arrastrar con enganche por rectángulo envolvente (márgenes y
+   separación de vecinas); flechas (paso configurable, ×10 con Mayús); R/Mayús+R;
+   panel X/Y (esquina inferior izquierda del envolvente)/ángulo absoluto o
+   relativo; validación en vivo en rojo + lista de problemas; aviso (naranja) de
+   giro fuera de las rotaciones permitidas; deshacer/rehacer; volver al motor.
+   Las piezas dentro de un hueco se mueven con su contenedor; movidas solas se desligan.
 4. PDF de taller, varias planchas en la interfaz, perfiles de material, guardar/abrir.
 5. Importador DXF probado con archivos reales, selección manual de contornos,
    ejecutable de Windows (PyInstaller u otro; comprobar que incluye spyrrow).

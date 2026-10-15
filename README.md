@@ -3,8 +3,7 @@
 Coloca piezas 2D (importadas de PDF vectorial o DXF) en planchas usando el
 mínimo material y exporta un DXF por plancha.
 
-Estado: **fase 2 (interfaz básica)**. La edición manual del resultado es la
-fase 3. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
+Estado: **fase 3 (edición manual del resultado)**. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
 
 ## Instalación en Windows
 
@@ -42,7 +41,15 @@ python -m nesting2d gui
    plancha, la fase y el mejor largo encontrado. **Detener** para al acabar la
    plancha en curso (el motor no se puede cortar a mitad).
 5. **Pestaña Resultado**: cada plancha con el retal libre, métricas y validación
-   (en rojo las piezas que incumplan separación o margen).
+   (en rojo las piezas que incumplan separación o margen). Edición manual:
+   - clic selecciona, Ctrl+clic añade o quita; arrastrar en vacío hace una
+     ventana (de izquierda a derecha, piezas enteras dentro; de derecha a
+     izquierda, piezas que toca);
+   - arrastrar mueve (con «Enganche», se pega a los márgenes y a la separación
+     de las vecinas); flechas mueven 1 mm (con Mayús, 10; el paso se cambia);
+   - R / Mayús+R giran con el paso del proyecto; el panel X, Y, ángulo coloca
+     por coordenadas (absoluto) o desplaza (relativo);
+   - Ctrl+Z / Ctrl+Y deshacen y rehacen; «Volver al resultado del motor».
 6. **Exportar DXF…** (Ctrl+E): `plancha_1.dxf`, `plancha_2.dxf`… en la carpeta
    que elijas. **Guardar** (Ctrl+S) crea el proyecto `.json`.
 

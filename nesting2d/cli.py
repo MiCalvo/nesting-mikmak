@@ -8,7 +8,10 @@ Ejemplos (desde la carpeta del proyecto):
 
   python -m nesting2d nest datos_prueba/RIGCCP*.pdf ^
       --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 ^
-      --plancha 1200x1000 --separacion 5 --margen 5 --tiempo 30 --salida salida
+      --plancha 1200x1000 --separacion 5 --margen 5 --finura normal --salida salida
+
+Tiempo de cálculo: automático según copias y rotaciones (--finura rapido, normal
+o fino; normal por defecto), o fijo con --tiempo SEGUNDOS.
 
 (en PowerShell el salto de línea es ` en lugar de ^; en Windows los comodines
 como RIGCCP*.pdf los expande la propia app)
@@ -22,6 +25,7 @@ from pathlib import Path
 
 from .engine.nester import nest
 from .engine.params import SIDES, NestParams
+from .engine.timing import FINENESS, describe, sheet_time
 from .exporters.dxf_export import export_sheet
 from .geometry import Part
 from .importers.contours import ImportOptions
@@ -94,7 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--rotacion", default="90", help="paso en grados, o 'libre'")
     b.add_argument("--lado", choices=list(SIDES), default="izquierda")
     b.add_argument("--sin-pieza-en-pieza", action="store_true")
-    b.add_argument("--tiempo", type=int, default=30, help="segundos de cálculo por plancha")
+    b.add_argument("--tiempo", type=int, default=None,
+                   help="segundos FIJOS de cálculo por plancha (si no se pone: automático)")
+    b.add_argument("--finura", choices=list(FINENESS), default="normal",
+                   help="modo automático: rapido, normal (por defecto) o fino")
     b.add_argument("--semilla", type=int, default=None)
     b.add_argument("--etiquetas", action="store_true", help="añade la capa ETIQUETAS al DXF")
     b.add_argument("--pdf-taller", action="store_true", help="genera también el PDF de taller (necesita PySide6)")
@@ -144,9 +151,13 @@ def main(argv: list[str] | None = None) -> int:
         separation=args.separacion, margin=args.margen,
         rotation_step=None if args.rotacion == "libre" else float(args.rotacion),
         part_in_part=not args.sin_pieza_en_pieza, compact_side=args.lado,
-        time_limit=args.tiempo, seed=args.semilla, material=args.material, thickness=args.espesor)
+        time_limit=args.tiempo, fineness=args.finura, seed=args.semilla,
+        material=args.material, thickness=args.espesor)
     total = sum(p.quantity for p in parts)
-    print(f"Calculando {total} piezas, hasta {args.tiempo} s por plancha…")
+    est = sheet_time(params.time_limit, params.fineness,
+                     [(p.quantity, p.rotations if p.rotations is not None else params.angles()) for p in parts])
+    print(f"Calculando {total} piezas, tiempo {describe(params.time_limit, params.fineness)}: "
+          f"~{est} s la primera plancha…")
     layout = nest(parts, params)
 
     out = Path(args.salida)

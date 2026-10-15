@@ -171,6 +171,7 @@ def test_full_flow(qapp, window, tmp_path):
     w = window
     import_gaskets(qapp, w)
     assert [p.name for p in w.model.parts] == list(QTY)
+    w.params_panel.calc_mode.setCurrentIndex(w.params_panel.calc_mode.findData("fijo"))
     w.params_panel.time_limit.setValue(2)
     w.params_panel.fix_seed.setChecked(True)
     w.params_panel.seed.setValue(1)
@@ -234,6 +235,7 @@ def test_stop_after_current_sheet(qapp, window):
     import_gaskets(qapp, w)
     w.params_panel.width.setValue(400)
     w.params_panel.height.setValue(300)
+    w.params_panel.calc_mode.setCurrentIndex(w.params_panel.calc_mode.findData("fijo"))
     w.params_panel.time_limit.setValue(2)
     w.params_panel.part_in_part.setChecked(False)
     w.start_nest()
@@ -777,3 +779,29 @@ def test_part_properties_card_edits_model(qapp, window):
     # varias filas: propiedades desactivadas, cantidad para la selección
     t.table.selectAll()
     assert not t.props.isEnabled() and t.b_qty.isEnabled()
+
+
+def test_calc_profile_in_params_panel(qapp, window, tmp_path):
+    from nesting2d.engine.timing import auto_time
+    w = window
+    pp = w.params_panel
+    p = pp.params()
+    assert p.time_limit is None and p.fineness == "normal"            # automático · normal por defecto
+    assert not pp.time_limit.isEnabled()
+    w.model.set_parts([Part("a", box(0, 0, 40, 30), quantity=16)])
+    assert pp.refresh_estimate() == auto_time(16) == 20
+    pp.calc_mode.setCurrentIndex(pp.calc_mode.findData("fino"))
+    assert pp.params().fineness == "fino" and pp.refresh_estimate() == 40
+    pp.rotation.setCurrentIndex(pp.rotation.findData(45.0))           # más orientaciones, más tiempo
+    assert pp.refresh_estimate() == 80
+    pp.calc_mode.setCurrentIndex(pp.calc_mode.findData("fijo"))
+    pp.time_limit.setValue(12)
+    assert pp.time_limit.isEnabled() and pp.params().time_limit == 12 and pp.refresh_estimate() == 12
+    # se guarda en el proyecto y vuelve igual
+    pp.calc_mode.setCurrentIndex(pp.calc_mode.findData("rapido"))
+    f = tmp_path / "t.json"
+    assert w._save_to(f)
+    pp.calc_mode.setCurrentIndex(pp.calc_mode.findData("normal"))
+    w.modified = False
+    assert w.open_project(f)
+    assert pp.calc_mode.currentData() == "rapido" and pp.params().time_limit is None

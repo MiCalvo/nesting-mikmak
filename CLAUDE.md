@@ -20,6 +20,7 @@ Fases 1 a 5 HECHAS y probadas por Mikel en Windows ("parece que funciona bien").
 Fase 6 (imágenes: capturas y escaneos con OpenCV) HECHA, sin probar aún por Mikel.
 Fase 7 (selección por aristas, círculos/arcos, taladros, DXF con arcos) HECHA, sin probar aún por Mikel.
 Fase 8 (rediseño de la interfaz: pasos en barra lateral, aspecto profesional) HECHA, sin probar aún por Mikel.
+Fase 9 (perfiles de cálculo: tiempo automático Rápido/Normal/Fino o fijo) HECHA, sin probar aún por Mikel.
 `python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
 no está PySide6). Pendiente: DXF reales de su CAD.
 
@@ -35,7 +36,8 @@ nesting2d/
                          completos (también arcos que suman 360°), piezas con solo lo elegido
   importers/dxf_import.py  DXF (ezdxf): bloques anidados/MINSERT, capa 0 heredada, capas
                          — probado con DXF sintéticos; FALTAN DXF reales del CAD
-  engine/params.py       NestParams (parámetros de proyecto)
+  engine/params.py       NestParams (parámetros de proyecto); time_limit None = automático
+  engine/timing.py       tiempo por plancha: automático (copias × rotaciones × finura) o fijo
   engine/part_in_part.py relleno voraz de huecos antes del motor
   engine/nester.py       capa sobre spyrrow: márgenes, lado de compactación, varias planchas
   validate.py            solapes, separación, margen (lo usará la edición manual)
@@ -184,7 +186,10 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 - Parámetros por proyecto: plancha (1200×1000), nº de planchas (ilimitado),
   separación y margen (5 mm PROVISIONALES, pendiente del proveedor), rotaciones
   (cada 90°; también 45°, 15°, libre), pieza dentro de pieza (activado), lado de
-  compactación (izquierda), tiempo (30 s por plancha), semilla, material/espesor.
+  compactación (izquierda), perfil de cálculo (Automático · Normal; también Rápido,
+  Fino o Fijo en s — decidido por Mikel el 15/10/2026: prima un resultado rápido;
+  máximo 180 s/plancha en automático; las rotaciones, parámetro aparte), semilla,
+  material/espesor.
   Por pieza: cantidad, escala, rotaciones restringidas, espejo (manual).
 - Perfiles de material reutilizables (plancha + separación + margen).
 - Edición manual tras el nesting: seleccionar, arrastrar, flechas (1 mm / 10 mm
@@ -227,6 +232,8 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
    visible, tarjeta de propiedades, indicadores y validación en el resultado,
    página Exportar con comprobaciones; mensajes ocultos salvo avisos. Sin tocar la
    lógica de nesting.
+9. ~~Perfiles de cálculo~~ (hecho, 15/10/2026, a petición de Mikel): medición del motor
+   (`docs/medicion_motor.md`) y tiempo automático Rápido/Normal/Fino o fijo.
 
 ## Pendientes abiertos
 - Separación y margen reales: los dirá el proveedor de la mica.

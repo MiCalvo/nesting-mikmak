@@ -17,7 +17,8 @@ class NestParams:
     rotation_step: float | None = 90.0  # grados; None = rotación libre
     part_in_part: bool = True
     compact_side: str = "izquierda"
-    time_limit: int = 30              # s de cálculo POR PLANCHA
+    time_limit: int | None = None     # s de cálculo POR PLANCHA; None = automático (engine/timing.py)
+    fineness: str = "normal"          # modo automático: "rapido", "normal" o "fino"
     seed: int | None = None           # fijarla repite el mismo resultado
     workers: int | None = None        # hilos del motor; None = todos los núcleos
     material: str = ""                # informativo (PDF de taller)

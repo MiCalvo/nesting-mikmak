@@ -29,6 +29,7 @@ from shapely.geometry import Polygon
 from ..geometry import Part
 from .params import NestParams
 from .part_in_part import FALLBACK_ANGLES, Block, PipItem, fill_holes
+from .timing import sheet_time
 
 EPS = 1e-6
 
@@ -36,7 +37,9 @@ EPS = 1e-6
 _FEASIBLE = (spyrrow.ReportType.ExplFeas, spyrrow.ReportType.CmprFeas, spyrrow.ReportType.Final)  # tupla: ReportType no es hashable
 
 # drain() -> [(fase, largo de la tira en mm, ¿solución válida?)]; fase: "exploring",
-# "compressing" o "final" (nombres de spyrrow)
+# "compressing" o "final" (nombres de spyrrow). La función lleva además el atributo
+# `time_limit`: segundos de cálculo de esa plancha (en modo automático cambia de una
+# plancha a otra).
 ProgressDrain = Callable[[], list[tuple[str, float, bool]]]
 
 
@@ -56,6 +59,7 @@ class Layout:
     sheets: int = 0
     unplaced: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    sheet_times: list[int] = field(default_factory=list)   # s de cálculo de cada plancha
 
     def on_sheet(self, s: int) -> list[Placement]:
         return [p for p in self.placements if p.sheet == s]
@@ -204,7 +208,11 @@ def nest(parts: list[Part], params: NestParams,
                                  allowed_orientations=shifted(u[2]))
                     for uid, u in units.items() if u[1] > 0]
         inst = spyrrow.StripPackingInstance(f"plancha{sheet}", strip_height=strip_h, items=sp_items)
-        cfg = spyrrow.StripPackingConfig(total_computation_time=int(params.time_limit),
+        seconds = sheet_time(params.time_limit, params.fineness,
+                             [(u[1] * (1 + len(u[3].inners) if u[3] else 1), u[2])
+                              for u in units.values() if u[1] > 0])
+        layout.sheet_times.append(seconds)
+        cfg = spyrrow.StripPackingConfig(total_computation_time=seconds,
                                          min_items_separation=params.separation or None,
                                          seed=params.seed, num_workers=params.workers)
         queue = None
@@ -213,6 +221,7 @@ def nest(parts: list[Part], params: NestParams,
 
             def drain(q=queue):
                 return [(rt.phase_name(), s.width, rt in _FEASIBLE) for rt, s in q.drain()]
+            drain.time_limit = seconds
             on_sheet(sheet, drain)
         sol = inst.solve(cfg, progress=queue)
 

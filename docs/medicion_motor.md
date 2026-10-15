@@ -72,3 +72,10 @@ pedido real, que siempre llega al tope (189 mm). Se mantiene el 80/20 de spyrrow
    permiten ahorrar una plancha entera.
 5. No medido: complejidad de las piezas (nº de vértices, formas irregulares) ni
    otro PC. Las fórmulas del modo automático son provisionales.
+
+## Aplicado (15/10/2026)
+
+Perfil de cálculo por defecto «Automático · Normal» (`nesting2d/engine/timing.py`):
+1,25 s por copia (10–120 s) × rotaciones (×1–×3) × finura (Rápido ×0,25, Normal
+×1, Fino ×2), entre 5 y 180 s por plancha. Mikel prefirió un máximo bajo: en
+trabajos de una plancha prima tener un resultado rápido. Sin intentos múltiples.

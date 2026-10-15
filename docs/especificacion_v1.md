@@ -134,7 +134,7 @@ Cada elemento importado es una fila con escala 1:1 por defecto. La escala se cor
 | Espejo permitido | Proyecto y pieza | No |
 | Pieza dentro de pieza | Proyecto | Activado |
 | Lado hacia el que compactar | Proyecto | Izquierda |
-| Tiempo de cálculo | Proyecto | 30 s (por plancha) |
+| Perfil de cálculo | Proyecto | Automático · Normal (decidido el 15/10/2026; antes, 30 s fijos) |
 | Semilla (avanzado) | Proyecto | Aleatoria; fijarla repite el mismo resultado |
 | Material y espesor | Proyecto | Vacío; solo informativo, sale en el PDF |
 | Tolerancia de unión de trazos | Ajustes generales | 0,01 mm |
@@ -151,7 +151,7 @@ spyrrow 0.9.0 (MIT), que envuelve para Python el algoritmo sparrow (Rust). Lo qu
 - Problema en tira: ancho fijo, largo mínimo. La plancha se modela como tira de alto = lado − 2 × margen.
 - Separación mínima entre piezas (con 3 mm pedidos se midieron 3,002 mm).
 - Rotaciones como lista de ángulos o libres.
-- Tiempo de cálculo y semilla configurables.
+- Tiempo de cálculo y semilla configurables. Perfil de cálculo: **Automático** (Rápido / Normal / Fino) o **Fijo** (segundos por plancha). En automático, tiempo por plancha = 1,25 s por copia que queda (entre 10 y 120 s) × factor de rotaciones (nº de orientaciones / 4, entre 1 y 3: 90° ×1, 45° ×2, 15° o libre ×3) × finura (Rápido ×0,25, Normal ×1, Fino ×2), entre 5 y 180 s. Mikel: para trabajos de una plancha prima un resultado rápido; para tiradas grandes, Fino o Fijo. Fórmula medida con las juntas (`docs/medicion_motor.md`), provisional; la complejidad de las piezas no entra hasta medirla. Las rotaciones siguen siendo un parámetro aparte.
 - Libera el bloqueo de Python mientras calcula y ofrece una cola de progreso.
 
 **Lo que no hace**: huecos (pieza en pieza), espejo, piezas fijas como obstáculos.
@@ -249,3 +249,4 @@ Nesting en plancha 1200 × 1000 mm, margen 5 mm, 30 s:
 6. **Imágenes** (añadida el 15/10/2026): capturas de pantalla y escaneos con OpenCV.
 7. **Aristas** (añadida el 15/10/2026): selección por aristas, reconocimiento de círculos y arcos, taladros por diámetro y DXF con arcos como opción.
 8. **Rediseño de la interfaz** (añadido el 15/10/2026, a petición de Mikel: «más limpia, con el paso a paso»): la ventana sigue el flujo de trabajo con una barra lateral de pasos (1 Piezas · 2 Material y parámetros · 3 Resultado · 4 Exportar) con su estado, botón «Calcular nesting» siempre visible, tarjeta de propiedades de la pieza, indicadores y validación en el resultado, y una página Exportar con las comprobaciones antes de cortar. No cambia la lógica de importación, nesting ni exportación.
+9. **Perfiles de cálculo** (añadido el 15/10/2026): medición del motor con las juntas y tiempo de cálculo automático (Rápido / Normal / Fino) o fijo.

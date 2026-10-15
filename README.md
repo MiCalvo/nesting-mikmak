@@ -79,7 +79,12 @@ oculto y se abre solo cuando hay un aviso (o desde Ver › Mensajes).
    medida real; puedes aplicarla a todas las piezas del mismo archivo. Con
    varias filas elegidas, «Cantidad · Aplicar a la selección».
 3. **Paso 2 · Material y parámetros**: plancha, separación, margen, rotaciones,
-   pieza dentro de pieza, lado de compactación, tiempo y semilla.
+   pieza dentro de pieza, lado de compactación, **perfil de cálculo** y semilla.
+   El perfil por defecto es «Automático · Normal»: el tiempo por plancha crece
+   con el nº de copias y con las rotaciones permitidas (45° ×2; 15° o libre ×3),
+   hasta 180 s; con el pedido de 16 juntas, ≈ 20 s. «Rápido» para tantear,
+   «Fino» para tiradas grandes, o «Fijo» con los segundos que quieras. Debajo se
+   ve el tiempo estimado. (Medición en `docs/medicion_motor.md`.)
 4. **Calcular nesting** (F5, en la barra lateral). Se calcula en segundo plano;
    debajo del botón se ven la plancha, la fase y el mejor largo encontrado. El
    botón pasa a **Detener**, que para al acabar la plancha en curso (el motor no
@@ -128,8 +133,11 @@ python -m nesting2d piezas "datos_prueba\RIGCCP*.pdf"
 Calcular el nesting del primer proyecto (16 juntas):
 
 ```
-python -m nesting2d nest "datos_prueba\RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --plancha 1200x1000 --separacion 5 --margen 5 --tiempo 30 --salida salida
+python -m nesting2d nest "datos_prueba\RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --plancha 1200x1000 --separacion 5 --margen 5 --salida salida
 ```
+
+Tiempo de cálculo: automático por defecto (`--finura rapido|normal|fino`), o
+fijo con `--tiempo SEGUNDOS` por plancha.
 
 En `salida\` quedan `plancha_1.dxf` (para el proveedor), `plancha_1.png`
 (para comprobarlo a ojo) y `proyecto.json`.

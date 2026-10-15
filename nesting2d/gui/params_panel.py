@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout
                                QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..engine.params import SIDES, NestParams
+from ..engine.timing import MAX_TIME, rotation_factor, sheet_time
 from ..importers.contours import ImportOptions
 from ..profiles import Profile, load_profiles, save_profiles
 from . import style
@@ -25,6 +26,11 @@ def profiles_path() -> Path:
     return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / "perfiles.json"
 
 ROTATION_STEPS = [("Cada 90°", 90.0), ("Cada 45°", 45.0), ("Cada 15°", 15.0), ("Libre", None)]
+# perfil de cálculo: modo automático con su finura, o tiempo fijo
+CALC_MODES = [("Automático · Rápido (para tantear)", "rapido"),
+              ("Automático · Normal (recomendado)", "normal"),
+              ("Automático · Fino (tiradas grandes)", "fino"),
+              ("Fijo (segundos por plancha)", "fijo")]
 
 
 def _dspin(lo, hi, dec, suffix, step=1.0) -> QDoubleSpinBox:
@@ -81,9 +87,16 @@ class ParamsPanel(QWidget):
         self.side = QComboBox()
         for s in SIDES:
             self.side.addItem(s.capitalize(), s)
-        self.time_limit = QSpinBox()
+        self.calc_mode = QComboBox()
+        for text, mode in CALC_MODES:
+            self.calc_mode.addItem(text, mode)
+        self.time_limit = QSpinBox()       # solo en modo fijo
         self.time_limit.setRange(1, 3600)
+        self.time_limit.setValue(30)
         self.time_limit.setSuffix(" s por plancha")
+        self.time_estimate = QLabel()
+        self.time_estimate.setWordWrap(True)
+        self.parts_fn = lambda: []         # piezas del proyecto, para estimar el tiempo
         self.fix_seed = QCheckBox("Fijar")
         self.seed = QSpinBox()
         self.seed.setRange(0, 2 ** 31 - 1)
@@ -95,7 +108,15 @@ class ParamsPanel(QWidget):
         f.addRow("Rotaciones permitidas:", self.rotation)
         f.addRow("Pieza dentro de pieza:", self.part_in_part)
         f.addRow("Compactar hacia:", self.side)
-        f.addRow("Tiempo de cálculo:", self.time_limit)
+        f.addRow("Perfil de cálculo:", self.calc_mode)
+        f.addRow("Tiempo fijo:", self.time_limit)
+        f.addRow("", self.time_estimate)
+        calc_hint = QLabel("Automático: el tiempo crece con el nº de copias y con las rotaciones permitidas "
+                           f"(45° ×2; 15° o libre ×3), hasta {MAX_TIME} s por plancha. Medido con tus juntas: "
+                           "pasar de Normal a Fino mejora el largo menos de un 1 %.")
+        calc_hint.setWordWrap(True)
+        calc_hint.setObjectName("muted")
+        f.addRow(calc_hint)
         f.addRow("Semilla (avanzado):", seed_row)
         hint = QLabel("Con la semilla fijada, el mismo proyecto da siempre el mismo resultado.")
         hint.setWordWrap(True)
@@ -171,6 +192,7 @@ class ParamsPanel(QWidget):
             w.valueChanged.connect(lambda *_: self._emit(True))
         for w in (self.max_sheets, self.time_limit, self.seed):
             w.valueChanged.connect(lambda *_: self._emit(True))
+        self.calc_mode.currentIndexChanged.connect(lambda *_: self._emit(True))
         for w in (self.rotation, self.side):
             w.currentIndexChanged.connect(lambda *_: self._emit(True))
         self.part_in_part.toggled.connect(lambda *_: self._emit(True))
@@ -185,8 +207,30 @@ class ParamsPanel(QWidget):
         self._emit(True)
 
     def _emit(self, affects: bool):
+        self.refresh_estimate()
         if not self._loading:
             self.changed.emit(affects)
+
+    def refresh_estimate(self) -> int | None:
+        """Pone (y devuelve) los segundos estimados para la primera plancha."""
+        fixed = self.calc_mode.currentData() == "fijo"
+        self.time_limit.setEnabled(fixed)
+        p = self.params()
+        items = [(q.quantity, q.rotations if q.rotations is not None else p.angles())
+                 for q in self.parts_fn() if q.quantity > 0]
+        secs = sheet_time(p.time_limit, p.fineness, items)
+        if fixed:
+            self.time_estimate.setText(f"{secs} s por plancha, sin ajuste automático.")
+        elif not items:
+            self.time_estimate.setText("El tiempo se calculará según las piezas que importes.")
+            return None
+        else:
+            copies = sum(n for n, _ in items)
+            f = sum(n * rotation_factor(a) for n, a in items) / copies
+            self.time_estimate.setText(f"≈ {secs} s por plancha ({copies} copias"
+                                       + (f", rotaciones ×{f:.1f}".replace(".", ",") if f > 1 else "")
+                                       + (f"; máximo {MAX_TIME} s" if secs >= MAX_TIME else "") + ").")
+        return secs
 
     # --- parámetros del proyecto ----------------------------------------------------
     def params(self) -> NestParams:
@@ -198,7 +242,9 @@ class ParamsPanel(QWidget):
             rotation_step=self.rotation.currentData(),
             part_in_part=self.part_in_part.isChecked(),
             compact_side=self.side.currentData(),
-            time_limit=self.time_limit.value(),
+            time_limit=self.time_limit.value() if self.calc_mode.currentData() == "fijo" else None,
+            fineness=(self.calc_mode.currentData() if self.calc_mode.currentData() != "fijo"
+                      else self._base.fineness),
             seed=self.seed.value() if self.fix_seed.isChecked() else None,
             material=self.material.text(), thickness=self.thickness.text())
 
@@ -218,7 +264,10 @@ class ParamsPanel(QWidget):
             self.rotation.setCurrentIndex(i)
             self.part_in_part.setChecked(p.part_in_part)
             self.side.setCurrentIndex(max(0, _find_data(self.side, p.compact_side)))
-            self.time_limit.setValue(int(p.time_limit))
+            mode = "fijo" if p.time_limit is not None else p.fineness
+            self.calc_mode.setCurrentIndex(max(0, _find_data(self.calc_mode, mode)))
+            if p.time_limit is not None:
+                self.time_limit.setValue(int(p.time_limit))
             self.fix_seed.setChecked(p.seed is not None)
             self.seed.setValue(p.seed or 0)
             self.seed.setEnabled(p.seed is not None)
@@ -226,6 +275,7 @@ class ParamsPanel(QWidget):
             self.thickness.setText(p.thickness)
         finally:
             self._loading = False
+        self.refresh_estimate()
 
     # --- perfiles ---------------------------------------------------------------------
     def reload_profiles(self):

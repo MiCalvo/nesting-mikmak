@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (QButtonGroup, QDockWidget, QFileDialog, QHBoxLayo
 from .. import project
 from ..engine.nester import Layout
 from ..engine.params import NestParams
+from ..engine.timing import describe
 from ..exporters.dxf_export import export_sheet
 from ..exporters.shop_pdf import export_shop_pdf
 from ..validate import check_layout
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         self._exported = False
         self._drain = None
         self._sheet = 0
+        self._sheet_limit = 0
         self._sheet_t0 = 0.0
         self._best: float | None = None
         self._phase = ""
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
         self.params_panel = ParamsPanel()
         self.result_panel = ResultPanel()
         self.result_panel.parts_fn = lambda: self.model.parts
+        self.params_panel.parts_fn = lambda: self.model.parts
 
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -248,8 +251,11 @@ class MainWindow(QMainWindow):
             self.footer_hint.setText("" if has_parts else "Importa al menos una pieza y ponle cantidad.")
         elif i == 1:
             self.b_forward.setText("Calcular nesting  (F5)")
+            secs = None if running else self.params_panel.refresh_estimate()
+            p = self.params_panel.params()
             self.footer_hint.setText("Calculando…" if running else
-                                     f"Hasta {self.params_panel.time_limit.value()} s por plancha.")
+                                     describe(p.time_limit, p.fineness)
+                                     + (f": ≈ {secs} s por plancha." if secs is not None else "."))
         elif i == 2:
             self.b_forward.setText("Siguiente: exportar  →")
             self.footer_hint.setText("Arrastra piezas para moverlas; los cambios se pueden deshacer (Ctrl+Z)."
@@ -274,6 +280,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_steps(self):
         """Estado de cada paso en la barra lateral y comprobaciones de la página Exportar."""
+        self.params_panel.refresh_estimate()     # depende de las copias y rotaciones de las piezas
         parts = self.model.parts
         copies = sum(p.quantity for p in parts)
         s1, s2, s3, s4 = self.steps
@@ -774,7 +781,8 @@ class MainWindow(QMainWindow):
             self._warn("El margen es demasiado grande para la plancha.")
             return
         total = sum(p.quantity for p in parts)
-        self.log(f"Calculando {total} piezas, hasta {params.time_limit} s por plancha…")
+        self.log(f"Calculando {total} piezas · tiempo {describe(params.time_limit, params.fineness)}"
+                 f" (≈ {self.params_panel.refresh_estimate()} s la primera plancha)…")
         self._edited_while_running = False
         self._stop_requested = False
         self._drain = None
@@ -807,7 +815,8 @@ class MainWindow(QMainWindow):
         self._sheet_t0 = time.monotonic()
         self._best = None
         self._phase = ""
-        self.progress.setRange(0, int(self.nest_worker.params.time_limit) if self.nest_worker else 0)
+        self._sheet_limit = int(getattr(drain, "time_limit", 0) or 0)   # cambia por plancha en automático
+        self.progress.setRange(0, self._sheet_limit)
 
     def _poll_progress(self):
         if self.nest_worker is None or self._drain is None:
@@ -817,7 +826,7 @@ class MainWindow(QMainWindow):
             if feasible and (self._best is None or width < self._best):
                 self._best = width
         elapsed = time.monotonic() - self._sheet_t0
-        limit = self.nest_worker.params.time_limit
+        limit = self._sheet_limit
         self.progress.setValue(min(int(elapsed), limit))
         best = f" · mejor largo {fmt(self._best)} mm" if self._best is not None else ""
         phase = f" · {self._phase}" if self._phase else ""

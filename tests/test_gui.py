@@ -28,6 +28,8 @@ def qapp():
     from nesting2d.gui import gc_guard
     app = QApplication.instance() or QApplication([])
     gc_guard.install(app)   # como en la app real: sin esto, el GC en otro hilo tumba Qt
+    from PySide6.QtCore import QStandardPaths
+    QStandardPaths.setTestModeEnabled(True)   # perfiles y ajustes en una carpeta de pruebas
     app.setOrganizationName("nesting2d-pruebas")
     app.setApplicationName("pruebas")
     yield app
@@ -373,3 +375,89 @@ def test_drag_snaps_to_neighbour_separation(qapp, window):
     _mouse(view, P.MouseButtonRelease, 120 - 44, 25)
     assert L.placements[1].polygon.bounds[0] == pytest.approx(55)    # 50 + 5
     assert w.result_panel.issues == []
+
+
+# --- fase 4: varias planchas, PDF de taller, perfiles, recientes -------------------------
+def test_move_to_new_sheet_and_remove_empty(qapp, window):
+    w = window
+    w._set_layout(_boxes_layout(), None)
+    rp, L = w.result_panel, w.layout_
+    rp.view.set_selection({1})
+    rp.target_sheet.setCurrentIndex(rp.target_sheet.findData(1))    # "Plancha nueva"
+    rp._move_to_sheet()
+    assert L.sheets == 2 and [q.sheet for q in L.placements] == [0, 1]
+    assert "1 piezas" in rp.sheet_combo.itemText(1)
+    # vaciar la plancha 1 y eliminarla
+    rp.view.set_selection({0})
+    rp.target_sheet.setCurrentIndex(rp.target_sheet.findData(1))
+    rp._move_to_sheet()
+    assert [q.sheet for q in L.placements] == [1, 1]
+    assert rp.b_compact.isEnabled()
+    rp.remove_empty_sheets()
+    assert L.sheets == 1 and [q.sheet for q in L.placements] == [0, 0]
+    rp.undo.undo()
+    assert L.sheets == 2 and [q.sheet for q in L.placements] == [1, 1]
+
+
+def test_shop_pdf(qapp, gaskets, tmp_path):
+    import pdfplumber
+
+    from nesting2d.exporters.shop_pdf import choose_scale, export_shop_pdf
+    assert choose_scale(1200, 1000, 190, 150) == 10
+    assert choose_scale(600, 400, 190, 150) == 5
+    layout = nest(gaskets, NestParams(sheet_width=400, sheet_height=300, time_limit=2, seed=1,
+                                      part_in_part=False, material="Mica", thickness="1,5 mm"))
+    f = export_shop_pdf(layout, gaskets, tmp_path / "t.pdf", title="Prueba")
+    with pdfplumber.open(f) as pdf:
+        assert len(pdf.pages) == 1 + layout.sheets
+        first = pdf.pages[0].extract_text()
+        for n in QTY:
+            assert n in first
+        assert "Mica" in first and "1,5 mm" in first
+        assert "Plancha 2 de" in pdf.pages[2].extract_text()
+
+
+def test_export_pdf_from_window(qapp, window, tmp_path, monkeypatch, gaskets):
+    from PySide6.QtWidgets import QFileDialog
+    w = window
+    layout = nest(gaskets, NestParams(time_limit=2, seed=1, part_in_part=False))
+    w.model.set_parts(gaskets)
+    w._set_layout(layout, [])
+    target = tmp_path / "salida.pdf"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
+    w.export_pdf()
+    assert target.exists() and target.stat().st_size > 1000
+
+
+def test_profiles_roundtrip_and_new_project(qapp, window, monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QInputDialog
+
+    from nesting2d.gui import params_panel
+    from nesting2d.profiles import Profile, load_profiles, save_profiles
+    path = tmp_path / "perfiles.json"
+    monkeypatch.setattr(params_panel, "profiles_path", lambda: path)
+    assert load_profiles(path)[0].name.startswith("Mica 1200")      # de serie si no hay archivo
+    save_profiles(path, [Profile("Vinilo 610", 610, 2000, 2, 3, "Vinilo")])
+    pp = window.params_panel
+    pp.reload_profiles()
+    assert pp.profile_combo.currentText() == "Vinilo 610"
+    pp.apply_selected_profile()
+    p = pp.params()
+    assert (p.sheet_width, p.sheet_height, p.separation, p.margin, p.material) == (610, 2000, 2, 3, "Vinilo")
+    # guardar el proyecto actual como perfil nuevo
+    pp.width.setValue(1500)
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Mica grande", True))
+    pp.save_as_profile()
+    assert [x.name for x in load_profiles(path)] == ["Vinilo 610", "Mica grande"]
+    # proyecto nuevo con perfil
+    window.modified = False
+    monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("Mica grande", True))
+    window.new_project()
+    assert window.params_panel.params().sheet_width == 1500
+
+
+def test_recent_files(qapp, window, tmp_path):
+    w = window
+    f = tmp_path / "r.json"
+    assert w._save_to(f)
+    assert w._recent()[0] == str(f.resolve())

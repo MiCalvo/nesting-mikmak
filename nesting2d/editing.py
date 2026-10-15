@@ -153,3 +153,12 @@ def transformed(layout: Layout, indices, angle: float = 0.0, dx: float = 0.0, dy
     if dx or dy:
         changes.update(moved(tmp, indices, dx, dy))
     return changes
+
+
+def compact_sheets(layout: Layout) -> tuple[Changes, int]:
+    """Quita las planchas vacías renumerando las demás. Devuelve (cambios, nº de planchas)."""
+    used = sorted({q.sheet for q in layout.placements})
+    remap = {old: new for new, old in enumerate(used)}
+    changes = {i: replace(q, sheet=remap[q.sheet]) for i, q in enumerate(layout.placements)
+               if remap[q.sheet] != q.sheet}
+    return changes, len(used)

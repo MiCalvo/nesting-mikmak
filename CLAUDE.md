@@ -16,10 +16,10 @@ cambiar comportamiento o alcance.
   cambies sin preguntar.
 
 ## Estado actual
-Fases 1 (núcleo), 2 (interfaz básica, validada por Mikel) y 3 (edición manual) HECHAS.
-`python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
-no está PySide6). La fase 3 solo se ha probado en Linux sin pantalla y con capturas.
-**Siguiente: fase 4** (ver "Plan por fases").
+Fases 1 (núcleo), 2 (interfaz básica, validada por Mikel), 3 (edición manual) y
+4 (producción) HECHAS. `python -m pytest` → todas en verde (las de interfaz, sin
+pantalla; se saltan si no está PySide6). Las fases 3 y 4 solo se han probado en
+Linux sin pantalla y con capturas. **Siguiente: fase 5** (ver "Plan por fases").
 
 ## Estructura
 ```
@@ -34,6 +34,9 @@ nesting2d/
   validate.py            solapes, separación, margen (lo usará la edición manual)
   exporters/dxf_export.py  DXF por plancha: capas CORTE, PLANCHA, ETIQUETAS (off por defecto)
   exporters/preview.py   PNG de comprobación (matplotlib, solo desarrollo)
+  exporters/shop_pdf.py  PDF de taller con QPdfWriter (resumen + una página por plancha a
+                         escala normalizada, piezas numeradas por posición, retal libre)
+  profiles.py            perfiles de material (plancha, separación, margen, material, espesor)
   project.py             guardar/abrir proyecto .json (geometría en WKT); v2 guarda también
                          el resultado del motor para "volver" a él
   editing.py             edición manual sin Qt: mover, girar, enganche, cambiar de plancha,
@@ -45,7 +48,8 @@ nesting2d/
   gui/parts_tab.py       pestaña Piezas + diálogo de escala por cota
   gui/part_view.py       vista ampliada de una pieza y herramienta de acotar
   gui/snapping.py        enganche a centros/vértices/aristas (sin Qt, probado aparte)
-  gui/params_panel.py    pestaña Parámetros (+ ajustes de importación en QSettings)
+  gui/params_panel.py    pestaña Parámetros, perfiles (perfiles.json en AppData) y ajustes
+                         de importación (QSettings)
   gui/result_view.py     pestaña Resultado y editor: selección (clic/ventana CAD), arrastre
                          con enganche, flechas, panel X/Y/ángulo, QUndoStack, validación en vivo
   gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
@@ -85,8 +89,14 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   en el hilo principal. Cualquier QApplication nueva (pruebas incluidas) debe llamarlo.
 - Interfaz: Y hacia arriba en los datos; las escenas de Qt dibujan en (x, −y).
 - `Layout.stats()["free"]` = retal desde un margen más allá de la última pieza
-  hasta el borde de la plancha, a todo su ancho. `result_view.free_rect` dibuja
-  esa misma zona (hay prueba que lo vigila).
+  hasta el borde de la plancha, a todo su ancho. `nester.free_rect` da esa misma
+  zona como rectángulo (la usan la vista y el PDF; hay prueba que lo vigila).
+- PDF de taller: librería elegida = QPdfWriter (viene con PySide6; sin dependencia
+  nueva). Necesita una QGuiApplication: `shop_pdf` la crea si no existe. Al extraer
+  texto con pdfplumber, los ":" salen como un carácter raro (mapeo de la fuente);
+  en las pruebas no se comparan textos con ":".
+- Pruebas de interfaz: `QStandardPaths.setTestModeEnabled(True)` para no tocar
+  los perfiles ni los ajustes reales.
 
 ## Decisiones cerradas (de la especificación)
 - Escala 1:1 por defecto; corrección manual o acotando dos puntos/arista
@@ -120,7 +130,10 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
    relativo; validación en vivo en rojo + lista de problemas; aviso (naranja) de
    giro fuera de las rotaciones permitidas; deshacer/rehacer; volver al motor.
    Las piezas dentro de un hueco se mueven con su contenedor; movidas solas se desligan.
-4. PDF de taller, varias planchas en la interfaz, perfiles de material, guardar/abrir.
+4. ~~Producción~~ (hecha): PDF de taller (también `nest --pdf-taller`); pasar piezas a
+   otra plancha o a una nueva y eliminar planchas vacías (con deshacer); recuentos
+   por plancha; perfiles de material (aplicar, guardar como, eliminar; se elige
+   al crear proyecto nuevo); abrir reciente; arrastrar archivos a la ventana.
 5. Importador DXF probado con archivos reales, selección manual de contornos,
    ejecutable de Windows (PyInstaller u otro; comprobar que incluye spyrrow).
 

@@ -27,36 +27,13 @@ from shapely.geometry import Polygon, box
 from shapely.ops import polylabel
 
 from .. import editing
-from ..engine.nester import Layout
+from ..engine.nester import Layout, free_rect  # noqa: F401  (free_rect: la usan las pruebas)
 from ..validate import Issue, check, check_layout
 from .qt_util import fmt, part_color, polygon_path
 
 SHEET_FILL = QColor("#f4f1ea")
 FREE_FILL = QColor(60, 170, 90, 45)
 SNAP_PX = 8
-
-
-def free_rect(layout: Layout, sheet: int) -> tuple[float, float, float, float] | None:
-    """Retal libre de la plancha como (x0, y0, x1, y1) en mm, o None si no queda.
-
-    Es la misma zona que mide `Layout.stats`: desde un margen más allá de la última
-    pieza (en la dirección de compactación) hasta el borde de la plancha, a todo
-    el ancho de la plancha.
-    """
-    pl = layout.on_sheet(sheet)
-    if not pl:
-        return None
-    p = layout.params
-    W, H, m = p.sheet_width, p.sheet_height, p.margin
-    minx = min(q.polygon.bounds[0] for q in pl)
-    miny = min(q.polygon.bounds[1] for q in pl)
-    maxx = max(q.polygon.bounds[2] for q in pl)
-    maxy = max(q.polygon.bounds[3] for q in pl)
-    r = {"izquierda": (maxx + m, 0.0, W, H), "derecha": (0.0, 0.0, minx - m, H),
-         "abajo": (0.0, maxy + m, W, H), "arriba": (0.0, 0.0, W, miny - m)}[p.compact_side]
-    if r[2] - r[0] <= 0 or r[3] - r[1] <= 0:
-        return None
-    return r
 
 
 def issue_text(layout: Layout, iss: Issue, separation: float) -> str:
@@ -449,6 +426,13 @@ class ResultPanel(QWidget):
         self.b_redo.setEnabled(False)
         self.b_engine = QPushButton("Volver al resultado del motor")
         self.b_engine.clicked.connect(self.revert_to_engine)
+        self.target_sheet = QComboBox()
+        self.b_to_sheet = QPushButton("Mover")
+        self.b_to_sheet.setToolTip("Pasa la selección (con las piezas que lleve dentro) a otra plancha, "
+                                   "en la misma posición.")
+        self.b_to_sheet.clicked.connect(self._move_to_sheet)
+        self.b_compact = QPushButton("Eliminar planchas vacías")
+        self.b_compact.clicked.connect(self.remove_empty_sheets)
 
         f = QFormLayout()
         modes = QHBoxLayout()
@@ -467,6 +451,10 @@ class ResultPanel(QWidget):
         ur.addWidget(self.b_redo)
         f.addRow(rot)
         f.addRow("Paso de flechas:", self.step)
+        mv = QHBoxLayout()
+        mv.addWidget(self.target_sheet, 1)
+        mv.addWidget(self.b_to_sheet)
+        f.addRow("A la plancha:", mv)
         help_ = QLabel("X, Y: esquina inferior izquierda del rectángulo que envuelve la selección. "
                        "Clic selecciona; Ctrl+clic añade; arrastrar en vacío: ventana (→ dentro, ← tocando); "
                        "flechas mueven (Mayús ×10); R / Mayús+R giran; botón central desplaza la vista.")
@@ -477,6 +465,7 @@ class ResultPanel(QWidget):
         v.addLayout(f)
         v.addLayout(ur)
         v.addWidget(self.b_engine)
+        v.addWidget(self.b_compact)
         v.addWidget(help_)
         return g
 
@@ -497,8 +486,16 @@ class ResultPanel(QWidget):
     def _update_edit_box(self):
         sel = sorted(self.view.selection)
         has = bool(sel) and self.layout_ is not None
-        for w in (self.ex, self.ey, self.apply_btn, self.rot_ccw, self.rot_cw):
+        for w in (self.ex, self.ey, self.apply_btn, self.rot_ccw, self.rot_cw, self.target_sheet, self.b_to_sheet):
             w.setEnabled(has)
+        L = self.layout_
+        self.target_sheet.clear()
+        if L is not None:
+            for t in range(L.sheets):
+                if t != self.current_sheet():
+                    self.target_sheet.addItem(f"Plancha {t + 1}", t)
+            self.target_sheet.addItem("Plancha nueva", L.sheets)
+        self.b_compact.setEnabled(L is not None and len({q.sheet for q in L.placements}) < L.sheets)
         step = self.rotation_step()
         self.rot_ccw.setText(f"Girar +{step:g}°")
         self.rot_cw.setText(f"Girar −{step:g}°")
@@ -557,9 +554,8 @@ class ResultPanel(QWidget):
         """Lo llaman los comandos de deshacer/rehacer."""
         L = self.layout_
         editing.apply(L, changes)
-        if sheets != L.sheets:
-            L.sheets = sheets
-            self._fill_sheet_combo(min(self.current_sheet(), sheets - 1))
+        L.sheets = sheets
+        self._fill_sheet_combo(min(self.current_sheet(), sheets - 1))
         self._revalidate()
         self._draw()
         self.edited.emit()
@@ -606,6 +602,23 @@ class ResultPanel(QWidget):
             return
         self.commit("Girar", editing.rotated(self.layout_, self._drag_set(self.view.selection),
                                              sign * self.rotation_step()))
+
+    def _move_to_sheet(self):
+        L = self.layout_
+        target = self.target_sheet.currentData()
+        if L is None or not self.view.selection or target is None:
+            return
+        idx = self._drag_set(self.view.selection)
+        self.commit(f"Pasar a la plancha {target + 1}", editing.to_sheet(L, idx, target),
+                    sheets_after=max(L.sheets, target + 1))
+
+    def remove_empty_sheets(self):
+        L = self.layout_
+        if L is None:
+            return
+        changes, n = editing.compact_sheets(L)
+        if n != L.sheets:
+            self.commit("Eliminar planchas vacías", changes, sheets_after=n)
 
     def revert_to_engine(self):
         L, E = self.layout_, self.engine
@@ -659,8 +672,9 @@ class ResultPanel(QWidget):
         self.sheet_combo.clear()
         L = self.layout_
         if L:
+            n = Counter(q.sheet for q in L.placements)
             for s in range(L.sheets):
-                self.sheet_combo.addItem(f"{s + 1} de {L.sheets}", s)
+                self.sheet_combo.addItem(f"{s + 1} de {L.sheets} ({n.get(s, 0)} piezas)", s)
             self.sheet_combo.setCurrentIndex(max(0, min(current, L.sheets - 1)))
         self.sheet_combo.blockSignals(False)
 
@@ -779,6 +793,12 @@ class ResultPanel(QWidget):
                 num = QTableWidgetItem(str(n))
                 num.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(r, 1, num)
+        if L.sheets > 1:
+            per = []
+            for t in range(L.sheets):
+                stt = L.stats(t)
+                per.append(f"Pl. {t + 1}: {len(L.on_sheet(t))} piezas · {fmt(100 * stt['utilization'])} %")
+            lines.append("<br>".join(per))
         if L.unplaced:
             left = ", ".join(f"{n} × {k}" for k, n in sorted(L.unplaced.items()))
             lines.append(f"<span style='color:#b00000'><b>Sin colocar:</b> {left}</span>")

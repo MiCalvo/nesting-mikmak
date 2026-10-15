@@ -3,7 +3,7 @@
 Coloca piezas 2D (importadas de PDF vectorial o DXF) en planchas usando el
 mínimo material y exporta un DXF por plancha.
 
-Estado: **fase 3 (edición manual del resultado)**. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
+Estado: **fase 4 (producción: PDF de taller, varias planchas, perfiles)**. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
 
 ## Instalación en Windows
 
@@ -50,8 +50,18 @@ python -m nesting2d gui
    - R / Mayús+R giran con el paso del proyecto; el panel X, Y, ángulo coloca
      por coordenadas (absoluto) o desplaza (relativo);
    - Ctrl+Z / Ctrl+Y deshacen y rehacen; «Volver al resultado del motor».
+   - «A la plancha»: pasa la selección a otra plancha o a una nueva;
+     «Eliminar planchas vacías».
 6. **Exportar DXF…** (Ctrl+E): `plancha_1.dxf`, `plancha_2.dxf`… en la carpeta
-   que elijas. **Guardar** (Ctrl+S) crea el proyecto `.json`.
+   que elijas. **Exportar PDF de taller…** (Ctrl+P): resumen con la tabla de
+   piezas y una página por plancha a escala, con cada pieza numerada.
+   **Guardar** (Ctrl+S) crea el proyecto `.json` (con el resultado del motor y
+   tus ediciones). Archivo → Abrir reciente; también puedes arrastrar PDF, DXF o
+   proyectos a la ventana.
+
+**Perfiles de material** (pestaña Parámetros): plantillas con plancha,
+separación, margen, material y espesor. «Guardar como perfil…» guarda los
+valores actuales; al crear un proyecto nuevo se elige perfil.
 
 Si cambias piezas o parámetros después de calcular, el resultado se marca como
 obsoleto y no se guarda en el proyecto hasta que vuelvas a calcular.

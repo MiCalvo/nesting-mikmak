@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--tiempo", type=int, default=30, help="segundos de cálculo por plancha")
     b.add_argument("--semilla", type=int, default=None)
     b.add_argument("--etiquetas", action="store_true", help="añade la capa ETIQUETAS al DXF")
+    b.add_argument("--pdf-taller", action="store_true", help="genera también el PDF de taller (necesita PySide6)")
+    b.add_argument("--material", default="", help="informativo, sale en el PDF de taller")
+    b.add_argument("--espesor", default="", help="informativo, sale en el PDF de taller")
     b.add_argument("--salida", default="salida")
 
     args = ap.parse_args(argv)
@@ -130,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         separation=args.separacion, margin=args.margen,
         rotation_step=None if args.rotacion == "libre" else float(args.rotacion),
         part_in_part=not args.sin_pieza_en_pieza, compact_side=args.lado,
-        time_limit=args.tiempo, seed=args.semilla)
+        time_limit=args.tiempo, seed=args.semilla, material=args.material, thickness=args.espesor)
     total = sum(p.quantity for p in parts)
     print(f"Calculando {total} piezas, hasta {args.tiempo} s por plancha…")
     layout = nest(parts, params)
@@ -150,6 +153,14 @@ def main(argv: list[str] | None = None) -> int:
               f"zona libre {st['free'][0]:.0f} x {st['free'][1]:.0f} mm, "
               f"aprovechamiento {100 * st['utilization']:.1f} % -> {dxf}")
     project.save(out / "proyecto.json", parts, params, layout)
+    if args.pdf_taller:
+        try:
+            from .exporters.shop_pdf import export_shop_pdf
+        except ImportError:
+            print("AVISO: el PDF de taller necesita PySide6 (pip install -e .[gui]).", file=sys.stderr)
+        else:
+            pdf = export_shop_pdf(layout, parts, out / "taller.pdf", title=out.name, issues_count=len(issues))
+            print(f"PDF de taller: {pdf}")
     for w in layout.warnings:
         print(f"AVISO {w}", file=sys.stderr)
     if issues:

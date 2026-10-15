@@ -10,13 +10,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
                                QPlainTextEdit, QProgressBar, QTabWidget)
 
 from .. import project
 from ..engine.nester import Layout
 from ..engine.params import NestParams
 from ..exporters.dxf_export import export_sheet
+from ..exporters.shop_pdf import export_shop_pdf
 from ..validate import check_layout
 from .params_panel import ParamsPanel
 from .parts_model import PartsModel
@@ -26,6 +27,7 @@ from .result_view import ResultPanel
 from .workers import ImportWorker, NestWorker
 
 APP_NAME = "Nesting 2D"
+MAX_RECENT = 8
 PHASES = {"exploring": "explorando", "compressing": "compactando", "final": "terminando"}
 
 
@@ -33,6 +35,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.resize(1300, 820)
+        self.setAcceptDrops(True)
         self.project_path: Path | None = None
         self.modified = False
         self.layout_: Layout | None = None
@@ -114,6 +117,8 @@ class MainWindow(QMainWindow):
         self.a_import = self._act("&Importar PDF/DXF…", self.import_files, "Ctrl+I")
         self.a_export = self._act("&Exportar DXF…", self.export_dxf, "Ctrl+E",
                                   "Un DXF por plancha (capas CORTE y PLANCHA)")
+        self.a_pdf = self._act("Exportar &PDF de taller…", self.export_pdf, "Ctrl+P",
+                               "Resumen + una página por plancha, a escala y con las piezas numeradas")
         self.a_labels = QAction("Incluir nombres en el DXF (capa ETIQUETAS)", self)
         self.a_labels.setCheckable(True)
         self.a_quit = self._act("&Salir", self.close, K.Quit)
@@ -123,8 +128,12 @@ class MainWindow(QMainWindow):
         self.a_about = self._act("&Acerca de…", self.about)
 
         m = self.menuBar().addMenu("&Archivo")
-        for a in (self.a_new, self.a_open, self.a_save, self.a_save_as, None, self.a_import,
-                  self.a_export, self.a_labels, None, self.a_quit):
+        for a in (self.a_new, self.a_open):
+            m.addAction(a)
+        self.recent_menu = m.addMenu("Abrir &reciente")
+        self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
+        for a in (self.a_save, self.a_save_as, None, self.a_import, None,
+                  self.a_export, self.a_labels, self.a_pdf, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = self.menuBar().addMenu("&Editar")
         self.a_undo = self.result_panel.undo.createUndoAction(self, "&Deshacer")
@@ -148,7 +157,7 @@ class MainWindow(QMainWindow):
         tb.setObjectName("principal")
         tb.setMovable(False)
         for a in (self.a_new, self.a_open, self.a_save, None, self.a_import, None,
-                  self.a_nest, self.a_stop, None, self.a_export):
+                  self.a_nest, self.a_stop, None, self.a_export, self.a_pdf):
             tb.addSeparator() if a is None else tb.addAction(a)
 
     def _update_actions(self):
@@ -157,7 +166,9 @@ class MainWindow(QMainWindow):
         self.a_nest.setEnabled(not running)
         self.a_stop.setEnabled(running)
         self.a_import.setEnabled(not importing)
-        self.a_export.setEnabled(self.layout_ is not None and self.layout_.sheets > 0)
+        has_result = self.layout_ is not None and self.layout_.sheets > 0
+        self.a_export.setEnabled(has_result)
+        self.a_pdf.setEnabled(has_result)
         for a in (self.a_new, self.a_open):
             a.setEnabled(not running and not importing)
 
@@ -216,8 +227,18 @@ class MainWindow(QMainWindow):
     def new_project(self):
         if not self._confirm_discard():
             return
+        params = NestParams()
+        profiles = self.params_panel.profiles
+        if profiles:
+            none = "Sin perfil (valores por defecto)"
+            names = [p.name for p in profiles] + [none]
+            name, ok = QInputDialog.getItem(self, "Proyecto nuevo", "Perfil de material:", names, 0, False)
+            if not ok:
+                return
+            if name != none:
+                params = profiles[names.index(name)].apply_to(params)
         self.model.set_parts([])
-        self.params_panel.set_params(NestParams())
+        self.params_panel.set_params(params)
         self._set_layout(None)
         self.project_path = None
         self._set_modified(False)
@@ -243,6 +264,7 @@ class MainWindow(QMainWindow):
         self._set_layout(layout, check_layout(layout) if layout else None, engine=data.engine_layout)
         self.project_path = path
         self._remember_dir(path)
+        self._add_recent(path)
         self._set_modified(False)
         self.log(f"Abierto {path}: {len(parts)} piezas" + (f", resultado con {layout.sheets} planchas" if layout else ""))
         return True
@@ -272,11 +294,57 @@ class MainWindow(QMainWindow):
             return False
         self.project_path = path
         self._remember_dir(path)
+        self._add_recent(path)
         self._set_modified(False)
         self.log(f"Guardado {path}")
         if self.result_stale and self.layout_ is not None:
             self.log("El resultado no se ha guardado porque no corresponde a los datos actuales; vuelve a calcular.")
         return True
+
+    def _recent(self) -> list[str]:
+        v = QSettings().value("recent", [])
+        if isinstance(v, str):     # QSettings devuelve un str si solo hay uno
+            v = [v]
+        return [str(x) for x in (v or [])]
+
+    def _add_recent(self, path: Path):
+        p = str(Path(path).resolve())
+        items = [p] + [x for x in self._recent() if x != p]
+        QSettings().setValue("recent", items[:MAX_RECENT])
+
+    def _fill_recent_menu(self):
+        self.recent_menu.clear()
+        items = self._recent()
+        if not items:
+            a = self.recent_menu.addAction("(ninguno)")
+            a.setEnabled(False)
+            return
+        for p in items:
+            a = self.recent_menu.addAction(p)
+            a.triggered.connect(lambda _=False, p=p: self._open_recent(p))
+
+    def _open_recent(self, p: str):
+        if not Path(p).exists():
+            self._warn(f"Ya no existe: {p}")
+            QSettings().setValue("recent", [x for x in self._recent() if x != p])
+            return
+        if self._confirm_discard():
+            self.open_project(p)
+
+    # --- arrastrar y soltar archivos ----------------------------------------------
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        files = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        projects = [f for f in files if f.lower().endswith(".json")]
+        drawings = [f for f in files if not f.lower().endswith(".json")]
+        if projects:
+            if self._confirm_discard():
+                self.open_project(projects[0])
+        elif drawings:
+            self.import_files(drawings)
 
     def _last_dir(self) -> str:
         return str(QSettings().value("last_dir", str(Path.home())))
@@ -460,21 +528,8 @@ class MainWindow(QMainWindow):
     # --- exportar ------------------------------------------------------------------
     def export_dxf(self):
         L = self.layout_
-        if L is None or L.sheets == 0:
+        if L is None or L.sheets == 0 or not self._export_problems():
             return
-        problems = []
-        if self.result_stale:
-            problems.append("el resultado no corresponde a los datos actuales")
-        if self.result_panel.issues:
-            problems.append(f"hay {len(self.result_panel.issues)} problemas de validación (piezas en rojo)")
-        if L.unplaced:
-            problems.append("hay piezas sin colocar")
-        if problems:
-            r = QMessageBox.warning(self, APP_NAME, "Atención: " + "; ".join(problems) + ".\n\n¿Exportar igualmente?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                    QMessageBox.StandardButton.No)
-            if r != QMessageBox.StandardButton.Yes:
-                return
         folder = QFileDialog.getExistingDirectory(self, "Carpeta para los DXF", self._last_dir())
         if not folder:
             return
@@ -496,10 +551,53 @@ class MainWindow(QMainWindow):
             self.log(f"Exportado {f}")
         self.status.setText(f"{len(files)} DXF exportados en {folder}")
 
+    def _export_problems(self) -> bool:
+        """Avisa si se va a exportar algo dudoso. True = seguir."""
+        L = self.layout_
+        problems = []
+        if self.result_stale:
+            problems.append("el resultado no corresponde a los datos actuales")
+        if self.result_panel.issues:
+            problems.append(f"hay {len(self.result_panel.issues)} problemas de validación (piezas en rojo)")
+        if self.result_panel.rot_warnings:
+            problems.append(f"hay {len(self.result_panel.rot_warnings)} pieza(s) con giro no permitido")
+        if L.unplaced:
+            problems.append("hay piezas sin colocar")
+        if not problems:
+            return True
+        r = QMessageBox.warning(self, APP_NAME, "Atención: " + "; ".join(problems) + ".\n\n¿Exportar igualmente?",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No)
+        return r == QMessageBox.StandardButton.Yes
+
+    def export_pdf(self):
+        L = self.layout_
+        if L is None or L.sheets == 0 or not self._export_problems():
+            return
+        stem = self.project_path.stem if self.project_path else "taller"
+        start = str(Path(self._last_dir()) / f"{stem}_taller.pdf")
+        path, _ = QFileDialog.getSaveFileName(self, "PDF de taller", start, "PDF (*.pdf)")
+        if not path:
+            return
+        path = Path(path)
+        if path.suffix.lower() != ".pdf":
+            path = path.with_suffix(".pdf")
+        title = self.project_path.stem if self.project_path else "Hoja de taller"
+        try:
+            export_shop_pdf(L, self.model.parts, path, title=title,
+                            issues_count=len(self.result_panel.issues),
+                            rotation_warnings=len(self.result_panel.rot_warnings))
+        except OSError as e:
+            self._warn(f"No se pudo escribir el PDF: {e}")
+            return
+        self._remember_dir(path)
+        self.log(f"PDF de taller: {path}")
+        self.status.setText(f"PDF de taller guardado en {path}")
+
     # --- otros -----------------------------------------------------------------------
     def about(self):
         QMessageBox.about(self, APP_NAME, (
-            f"<b>{APP_NAME}</b> — fase 2 (interfaz básica)<br><br>"
+            f"<b>{APP_NAME}</b><br><br>"
             "Motor de nesting: spyrrow 0.9.0 (MIT), sobre sparrow (MIT) y jagua-rs (MPL-2.0).<br>"
             "Interfaz: PySide6 / Qt (LGPL). PDF: pdfplumber (MIT). Geometría: shapely (BSD-3). DXF: ezdxf (MIT)."))
 

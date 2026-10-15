@@ -7,13 +7,21 @@ con QSettings; se aplican a las importaciones siguientes.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
-from PySide6.QtCore import QSettings, Signal
+from PySide6.QtCore import QSettings, QStandardPaths, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
-                               QHBoxLayout, QLabel, QLineEdit, QSpinBox, QVBoxLayout, QWidget)
+                               QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox,
+                               QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..engine.params import SIDES, NestParams
 from ..importers.contours import ImportOptions
+from ..profiles import Profile, load_profiles, save_profiles
+
+
+def profiles_path() -> Path:
+    """perfiles.json en la carpeta de datos de la aplicación (en Windows, dentro de AppData)."""
+    return Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)) / "perfiles.json"
 
 ROTATION_STEPS = [("Cada 90°", 90.0), ("Cada 45°", 45.0), ("Cada 15°", 15.0), ("Libre", None)]
 
@@ -93,6 +101,26 @@ class ParamsPanel(QWidget):
         hint.setStyleSheet("color: gray;")
         f.addRow(hint)
 
+        # --- perfiles de material --------------------------------------------------
+        self.profiles: list[Profile] = []
+        self.profile_combo = QComboBox()
+        b_apply = QPushButton("Aplicar al proyecto")
+        b_apply.setToolTip("Copia plancha, separación, margen, material y espesor del perfil al proyecto.")
+        b_apply.clicked.connect(self.apply_selected_profile)
+        b_save = QPushButton("Guardar como perfil…")
+        b_save.clicked.connect(self.save_as_profile)
+        self.b_delete_profile = QPushButton("Eliminar perfil")
+        self.b_delete_profile.clicked.connect(self.delete_selected_profile)
+        prof = QGroupBox("Perfil de material (plantilla reutilizable)")
+        pv = QVBoxLayout(prof)
+        pv.addWidget(self.profile_combo)
+        pb = QHBoxLayout()
+        pb.addWidget(b_apply)
+        pb.addWidget(b_save)
+        pb.addWidget(self.b_delete_profile)
+        pv.addLayout(pb)
+        self.reload_profiles()
+
         # --- material (informativo) ---------------------------------------------
         self.material = QLineEdit()
         self.thickness = QLineEdit()
@@ -114,6 +142,7 @@ class ParamsPanel(QWidget):
 
         cols = QHBoxLayout()
         left, right = QVBoxLayout(), QVBoxLayout()
+        left.addWidget(prof)
         left.addWidget(sheet)
         left.addWidget(mat)
         left.addStretch(1)
@@ -187,6 +216,57 @@ class ParamsPanel(QWidget):
             self.thickness.setText(p.thickness)
         finally:
             self._loading = False
+
+    # --- perfiles ---------------------------------------------------------------------
+    def reload_profiles(self):
+        try:
+            self.profiles = load_profiles(profiles_path())
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Perfiles", f"No se pudieron leer los perfiles ({e}).")
+            self.profiles = []
+        self.profile_combo.clear()
+        for pr in self.profiles:
+            self.profile_combo.addItem(pr.name)
+        self.b_delete_profile.setEnabled(bool(self.profiles))
+
+    def apply_profile(self, pr: Profile):
+        self.set_params(pr.apply_to(self.params()))
+        self.changed.emit(True)
+
+    def apply_selected_profile(self):
+        i = self.profile_combo.currentIndex()
+        if 0 <= i < len(self.profiles):
+            self.apply_profile(self.profiles[i])
+
+    def save_as_profile(self):
+        name, ok = QInputDialog.getText(self, "Guardar perfil", "Nombre del perfil:",
+                                        text=self.profile_combo.currentText())
+        name = name.strip()
+        if not ok or not name:
+            return
+        new = Profile.from_params(name, self.params())
+        existing = [i for i, pr in enumerate(self.profiles) if pr.name == name]
+        if existing:
+            r = QMessageBox.question(self, "Guardar perfil", f"Ya existe el perfil «{name}». ¿Sustituirlo?")
+            if r != QMessageBox.StandardButton.Yes:
+                return
+            self.profiles[existing[0]] = new
+        else:
+            self.profiles.append(new)
+        save_profiles(profiles_path(), self.profiles)
+        self.reload_profiles()
+        self.profile_combo.setCurrentText(name)
+
+    def delete_selected_profile(self):
+        i = self.profile_combo.currentIndex()
+        if not 0 <= i < len(self.profiles):
+            return
+        r = QMessageBox.question(self, "Eliminar perfil", f"¿Eliminar el perfil «{self.profiles[i].name}»?")
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        del self.profiles[i]
+        save_profiles(profiles_path(), self.profiles)
+        self.reload_profiles()
 
     # --- ajustes generales ------------------------------------------------------------
     def import_options(self) -> ImportOptions:

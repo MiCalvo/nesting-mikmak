@@ -90,6 +90,29 @@ class Layout:
         return {"used_length": used, "free": free, "utilization": area / (W * H)}
 
 
+def free_rect(layout: Layout, sheet: int) -> tuple[float, float, float, float] | None:
+    """Retal libre de la plancha como (x0, y0, x1, y1) en mm, o None si no queda.
+
+    Es la misma zona que mide `Layout.stats`: desde un margen más allá de la última
+    pieza (en la dirección de compactación) hasta el borde de la plancha, a todo
+    el ancho de la plancha.
+    """
+    pl = layout.on_sheet(sheet)
+    if not pl:
+        return None
+    p = layout.params
+    W, H, m = p.sheet_width, p.sheet_height, p.margin
+    minx = min(q.polygon.bounds[0] for q in pl)
+    miny = min(q.polygon.bounds[1] for q in pl)
+    maxx = max(q.polygon.bounds[2] for q in pl)
+    maxy = max(q.polygon.bounds[3] for q in pl)
+    r = {"izquierda": (maxx + m, 0.0, W, H), "derecha": (0.0, 0.0, minx - m, H),
+         "abajo": (0.0, maxy + m, W, H), "arriba": (0.0, 0.0, W, miny - m)}[p.compact_side]
+    if r[2] - r[0] <= 0 or r[3] - r[1] <= 0:
+        return None
+    return r
+
+
 def _frame(params: NestParams):
     """Devuelve (giro R, alto de tira, largo disponible, desplazamiento tras girar)."""
     R = params.frame_rotation()

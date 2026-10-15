@@ -3,7 +3,7 @@
 Coloca piezas 2D (importadas de PDF vectorial o DXF) en planchas usando el
 mínimo material y exporta un DXF por plancha.
 
-Estado: **fase 4 (producción: PDF de taller, varias planchas, perfiles)**. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
+Estado: **fases 1 a 5 hechas**. Falta probar el importador DXF con archivos reales del CAD. Especificación: `docs/especificacion_v1.md`. Guía para Claude Code: `CLAUDE.md`.
 
 ## Instalación en Windows
 
@@ -19,6 +19,16 @@ python -m pytest
 Si `py` no existe, usa la ruta de tu `python.exe`. Las pruebas tardan alrededor
 de 1 minuto (el motor calcula de verdad) y deben salir 27 en verde.
 
+## Ejecutable de Windows
+
+Sin instalar Python: en GitHub, pestaña **Actions** → la última ejecución de
+«Windows» en verde → **Artifacts** → `Nesting2D-windows`. Descomprime y abre
+`Nesting2D\Nesting2D.exe` (no lo saques de su carpeta: necesita `_internal`).
+`nesting2d-cli.exe autoprueba` comprueba que todo funciona.
+
+Para construirlo tú: `packaging\construir_windows.bat` (deja el resultado en
+`dist\Nesting2D\`).
+
 ## Interfaz gráfica
 
 ```
@@ -27,9 +37,15 @@ python -m nesting2d gui
 
 (o `nesting2d-gui`, que abre la ventana sin consola). Flujo:
 
-1. **Importar PDF/DXF…** (Ctrl+I). Cada archivo da una o varias piezas. Si un
-   archivo tiene muchos contornos (un plano con vistas, cotas y cajetín), la app
-   pregunta si importarlos con cantidad 0 para que pongas cantidad solo a los buenos.
+1. **Importar PDF/DXF…** (Ctrl+I). Cada archivo da una o varias piezas. Un DXF
+   con varias capas pregunta cuáles importar. Si un archivo tiene muchos
+   contornos (un plano con vistas, cotas y cajetín), la app pregunta si
+   importarlos con cantidad 0 o **seleccionar los contornos a mano**
+   (también: Archivo → Importar seleccionando contornos, Ctrl+Mayús+I). En ese
+   diálogo, **lo azul es la pieza**: una ventana añade lo que encierra (con sus
+   huecos), un clic cambia una zona de hueco a material o al revés, y
+   Mayús+clic hace ese cambio en todas las zonas iguales (por ejemplo, todos
+   los taladros).
 2. **Pestaña Piezas**: doble clic para cambiar nombre, escala, cantidad o
    rotaciones; casilla de espejo. Para corregir la escala con una medida conocida,
    selecciona la pieza y pulsa **Acotar: dos puntos** (engancha a centros de

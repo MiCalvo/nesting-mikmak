@@ -74,6 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("gui", help="abre la interfaz gráfica")
     g.add_argument("proyecto", nargs="?", help="proyecto .json para abrir al arrancar")
 
+    t = sub.add_parser("autoprueba", help="comprueba que motor, importadores, exportadores y Qt funcionan")
+    t.add_argument("--informe", help="guarda también el resultado en este archivo de texto")
+
     a = sub.add_parser("piezas", help="importa y lista las piezas con sus medidas")
     a.add_argument("archivos", nargs="+")
 
@@ -96,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--salida", default="salida")
 
     args = ap.parse_args(argv)
+    if args.cmd == "autoprueba":
+        from .selftest import run
+        return run(args.informe)
     if args.cmd == "gui":
         try:
             from .gui.app import main as gui_main

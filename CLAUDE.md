@@ -16,10 +16,10 @@ cambiar comportamiento o alcance.
   cambies sin preguntar.
 
 ## Estado actual
-Fases 1 (núcleo), 2 (interfaz básica, validada por Mikel), 3 (edición manual) y
-4 (producción) HECHAS. `python -m pytest` → todas en verde (las de interfaz, sin
-pantalla; se saltan si no está PySide6). Las fases 3 y 4 solo se han probado en
-Linux sin pantalla y con capturas. **Siguiente: fase 5** (ver "Plan por fases").
+Fases 1 a 5 HECHAS (la 2 validada por Mikel; 3, 4 y 5 probadas en Linux sin
+pantalla, con capturas, y en Windows solo por GitHub Actions). `python -m pytest`
+→ todas en verde (las de interfaz, sin pantalla; se saltan si no está PySide6).
+Pendiente: que Mikel pruebe 3–5 en Windows y pase DXF reales de su CAD.
 
 ## Estructura
 ```
@@ -27,7 +27,8 @@ nesting2d/
   geometry.py            Part (pieza: forma original + escala, cantidad, rotaciones, espejo)
   importers/contours.py  trazos sueltos -> piezas con huecos (unión de extremos + regla par-impar)
   importers/pdf_import.py  PDF vectorial (pdfplumber)
-  importers/dxf_import.py  DXF (ezdxf) — SIN PROBAR con DXF reales de CAD
+  importers/dxf_import.py  DXF (ezdxf): bloques anidados/MINSERT, capa 0 heredada, capas
+                         — probado con DXF sintéticos; FALTAN DXF reales del CAD
   engine/params.py       NestParams (parámetros de proyecto)
   engine/part_in_part.py relleno voraz de huecos antes del motor
   engine/nester.py       capa sobre spyrrow: márgenes, lado de compactación, varias planchas
@@ -41,7 +42,8 @@ nesting2d/
                          el resultado del motor para "volver" a él
   editing.py             edición manual sin Qt: mover, girar, enganche, cambiar de plancha,
                          avisos de giro no permitido (devuelve cambios; la GUI los deshace)
-  cli.py                 línea de comandos: `gui`, `piezas` y `nest`
+  cli.py                 línea de comandos: `gui`, `autoprueba`, `piezas` y `nest`
+  selftest.py            autoprueba sin archivos externos (motor, DXF, PDF, Qt)
   gui/app.py             arranque (QApplication + gc_guard + MainWindow)
   gui/main_window.py     ventana: menús, importar/calcular en hilos, guardar/abrir, exportar DXF
   gui/parts_model.py     tabla de piezas (modelo + editores de escala/cantidad/rotaciones)
@@ -54,6 +56,9 @@ nesting2d/
                          con enganche, flechas, panel X/Y/ángulo, QUndoStack, validación en vivo
   gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
   gui/gc_guard.py        recolección de basura solo en el hilo principal (ver abajo)
+  gui/contour_dialog.py  selección manual de contornos ("lo azul es la pieza") y capas DXF
+packaging/               PyInstaller: nesting2d.spec, lanzadores, construir_windows.bat
+.github/workflows/windows.yml  pruebas + ejecutable + autoprueba en Windows en cada push
 tests/                   pruebas con las juntas reales de datos_prueba/
 datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vistas
 ```
@@ -97,6 +102,16 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   en las pruebas no se comparan textos con ":".
 - Pruebas de interfaz: `QStandardPaths.setTestModeEnabled(True)` para no tocar
   los perfiles ni los ajustes reales.
+- Selección manual de contornos: la regla par-impar NO sirve sola en planos con
+  líneas que no son cortes (escalones, chaflanes, taladros dibujados con dos
+  circunferencias). Por eso el diálogo es "lo azul es la pieza": la ventana
+  propone material/hueco por par-impar entre lo que encierra, el clic corrige una
+  zona y Mayús+clic todas las zonas iguales. Visto con el plano RIG23P0054.
+- `build_parts` = `closed_faces` + `parts_from_faces`; el diálogo usa las caras.
+- DXF: los bloques anidados se perdían (0 piezas) hasta la fase 5; hay prueba.
+- Ejecutable: PyInstaller en modo carpeta (dist/Nesting2D: Nesting2D.exe ventana +
+  nesting2d-cli.exe consola). Construido y probado en Linux (≈300 MB; la
+  autoprueba pasa con spyrrow empaquetado). En Windows lo construye Actions.
 
 ## Decisiones cerradas (de la especificación)
 - Escala 1:1 por defecto; corrección manual o acotando dos puntos/arista
@@ -134,8 +149,9 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
    otra plancha o a una nueva y eliminar planchas vacías (con deshacer); recuentos
    por plancha; perfiles de material (aplicar, guardar como, eliminar; se elige
    al crear proyecto nuevo); abrir reciente; arrastrar archivos a la ventana.
-5. Importador DXF probado con archivos reales, selección manual de contornos,
-   ejecutable de Windows (PyInstaller u otro; comprobar que incluye spyrrow).
+5. ~~Ampliaciones~~ (hechas, salvo DXF reales): importador DXF reforzado (bloques
+   anidados, MINSERT, capa 0, aviso de pulgadas, elegir capas); selección manual
+   de contornos; ejecutable de Windows con PyInstaller y autoprueba.
 
 ## Pendientes abiertos
 - Separación y margen reales: los dirá el proveedor de la mica.
@@ -148,6 +164,8 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 ## Comandos
 ```
 python -m nesting2d gui            (o `nesting2d-gui` tras `pip install -e .[gui]`)
+python -m nesting2d autoprueba
+pyinstaller --noconfirm packaging/nesting2d.spec   (o packaging\construir_windows.bat)
 python -m pytest                   (las de interfaz usan QT_QPA_PLATFORM=offscreen)
 python -m nesting2d piezas "datos_prueba/RIGCCP*.pdf"
 python -m nesting2d nest "datos_prueba/RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --salida salida

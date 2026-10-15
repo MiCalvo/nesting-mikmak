@@ -1,0 +1,59 @@
+# Pruebas + ejecutable de Windows.
+# En cada push: pasa todas las pruebas en Windows, construye dist/Nesting2D con
+# PyInstaller, ejecuta la autoprueba del ejecutable, comprueba que la ventana
+# arranca y deja el .zip para descargar (pestaña Actions -> la ejecución -> Artifacts).
+name: Windows
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev,gui] pyinstaller
+
+      - name: Pruebas
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Construir ejecutable
+        run: pyinstaller --noconfirm packaging/nesting2d.spec
+
+      - name: Autoprueba del ejecutable
+        run: dist\Nesting2D\nesting2d-cli.exe autoprueba --informe informe-autoprueba.txt
+
+      - name: Arranque de la ventana
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\Nesting2D\Nesting2D.exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Error "La ventana se cerró sola (código $($p.ExitCode))"; exit 1 }
+          Stop-Process -Id $p.Id
+          Write-Host "La ventana sigue abierta tras 15 s: arranque correcto"
+
+      - name: Empaquetar
+        shell: pwsh
+        run: Compress-Archive -Path dist\Nesting2D -DestinationPath Nesting2D-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nesting2D-windows
+          path: |
+            Nesting2D-windows.zip
+            informe-autoprueba.txt
+          retention-days: 14

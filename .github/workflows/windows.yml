@@ -1,7 +1,7 @@
 # Pruebas + ejecutable de Windows.
 # En cada push: pasa todas las pruebas en Windows, construye dist/Nesting2D con
 # PyInstaller, ejecuta la autoprueba del ejecutable, comprueba que la ventana
-# arranca y deja el .zip para descargar (pestaña Actions -> la ejecución -> Artifacts).
+# arranca y deja la carpeta para descargar (pestaña Actions -> la ejecución -> Artifacts).
 name: Windows
 
 on:
@@ -47,14 +47,15 @@ jobs:
           Stop-Process -Id $p.Id
           Write-Host "La ventana sigue abierta tras 15 s: arranque correcto"
 
-      - name: Empaquetar
+      # Sin Compress-Archive: el .zip que creaba dentro del de GitHub el explorador de
+      # Windows lo tomaba por protegido con contraseña (lo vio Mikel). Se sube la
+      # carpeta tal cual y GitHub la comprime una sola vez.
+      - name: Preparar carpeta para descargar
         shell: pwsh
-        run: Compress-Archive -Path dist\Nesting2D -DestinationPath Nesting2D-windows.zip
+        run: Copy-Item informe-autoprueba.txt dist\informe-autoprueba.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: Nesting2D-windows
-          path: |
-            Nesting2D-windows.zip
-            informe-autoprueba.txt
+          path: dist/
           retention-days: 14

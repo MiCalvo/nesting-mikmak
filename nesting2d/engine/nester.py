@@ -60,6 +60,7 @@ class Layout:
     unplaced: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     sheet_times: list[int] = field(default_factory=list)   # s de cálculo de cada plancha
+    fill: dict | None = None    # modo rellenar: juegos, proporción, relleno (engine/fill.py)
 
     def on_sheet(self, s: int) -> list[Placement]:
         return [p for p in self.placements if p.sheet == s]

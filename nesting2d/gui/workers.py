@@ -16,6 +16,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from ..engine.fill import fill_sheet
 from ..engine.nester import nest
 from ..engine.params import NestParams
 from ..geometry import Part
@@ -71,6 +72,7 @@ class ImportWorker(QThread):
 
 class NestWorker(QThread):
     sheet_started = Signal(int, object)    # nº de plancha, función drain() de progreso
+    probe = Signal(int, int, bool, bool)   # rellenar: juegos, sueltas, ¿caben?, ¿colocación final?
     done = Signal(object, object)          # Layout, problemas de validación
     failed = Signal(str)
 
@@ -86,9 +88,12 @@ class NestWorker(QThread):
 
     def run(self):
         try:
-            layout = nest(self.parts, self.params,
-                          on_sheet=lambda s, drain: self.sheet_started.emit(s, drain),
-                          should_stop=self._stop.is_set)
+            on_sheet = lambda s, drain: self.sheet_started.emit(s, drain)  # noqa: E731
+            if self.params.mode == "rellenar":
+                layout = fill_sheet(self.parts, self.params, on_sheet=on_sheet, should_stop=self._stop.is_set,
+                                    on_probe=lambda k, j, ok, final: self.probe.emit(k, j, ok, final))
+            else:
+                layout = nest(self.parts, self.params, on_sheet=on_sheet, should_stop=self._stop.is_set)
             issues = check_layout(layout)
         except Exception:
             self.failed.emit(traceback.format_exc())

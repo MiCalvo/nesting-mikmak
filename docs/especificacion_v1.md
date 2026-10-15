@@ -33,7 +33,7 @@ La v1 cubre el flujo completo, desde el PDF hasta el DXF de corte, con edición 
 - Fijar piezas a mano y recalcular el resto a su alrededor.
 - Pieza dentro de pieza mejorada: recursiva y con búsqueda global, no voraz.
 - Espejo usado por el motor para encajar mejor.
-- Modo rellenar: máximo de copias de una pieza en una plancha.
+- ~~Modo rellenar~~: adelantado y hecho el 15/10/2026 (ver «Modo rellenar la plancha»).
 - Planchas de distinto tamaño e inventario de retales.
 
 **Fuera de alcance**
@@ -239,6 +239,17 @@ Nesting en plancha 1200 × 1000 mm, margen 5 mm, 30 s:
 - Selección manual de contornos puede ser laboriosa en planos con muchas vistas.
 - Rendimiento del relleno de huecos con muchas piezas o huecos complejos.
 
+## Modo rellenar la plancha
+
+Decidido con Mikel el 15/10/2026. Pregunta: «¿cuántas piezas entran en esta plancha?».
+
+- En el paso 2, «Qué calcular»: **Cantidades fijas** (lo normal) o **Rellenar la plancha**.
+- En modo rellenar, la columna «Cantidad» pasa a ser **«Proporción»**: 2, 1, 1 = juegos de 2 de A, 1 de B y 1 de C; un 0 deja fuera la referencia.
+- Se busca el máximo de **juegos completos** en **una sola plancha**; después, el hueco que quede se rellena con piezas sueltas de **una referencia elegida** (o con nada).
+- Cómo: spyrrow no tiene modo «máximo», así que se tantea: intentos de 10 s con k juegos (sube si caben, baja si no; a saltos y luego por mitades), lo mismo con las sueltas, y la colocación final con el perfil de cálculo.
+- El resultado es «caben **al menos** N»: con más tiempo quizá entre alguna más. Ejemplo medido: RIGCCP0019:0018:0016 = 2:1:1 en 1200 × 1000 → 21–22 juegos según el tiempo y la semilla.
+- El resultado se edita y se exporta como cualquier otro; el PDF de taller muestra la proporción y los juegos. Línea de comandos: `nest --rellenar [--relleno NOMBRE]`.
+
 ## Plan por fases
 
 1. **Núcleo** (hecho): importador PDF, geometría, motor con márgenes, pieza en pieza y varias planchas, exportación DXF, proyecto .json, línea de comandos y pruebas.
@@ -250,3 +261,4 @@ Nesting en plancha 1200 × 1000 mm, margen 5 mm, 30 s:
 7. **Aristas** (añadida el 15/10/2026): selección por aristas, reconocimiento de círculos y arcos, taladros por diámetro y DXF con arcos como opción.
 8. **Rediseño de la interfaz** (añadido el 15/10/2026, a petición de Mikel: «más limpia, con el paso a paso»): la ventana sigue el flujo de trabajo con una barra lateral de pasos (1 Piezas · 2 Material y parámetros · 3 Resultado · 4 Exportar) con su estado, botón «Calcular nesting» siempre visible, tarjeta de propiedades de la pieza, indicadores y validación en el resultado, y una página Exportar con las comprobaciones antes de cortar. No cambia la lógica de importación, nesting ni exportación.
 9. **Perfiles de cálculo** (añadido el 15/10/2026): medición del motor con las juntas y tiempo de cálculo automático (Rápido / Normal / Fino) o fijo.
+10. **Modo rellenar la plancha** (añadido el 15/10/2026, a petición de Mikel; estaba en v2): cuántos juegos caben en una plancha, en proporción, y relleno del hueco con una referencia elegida.

@@ -21,6 +21,7 @@ Fase 6 (imágenes: capturas y escaneos con OpenCV) HECHA, sin probar aún por Mi
 Fase 7 (selección por aristas, círculos/arcos, taladros, DXF con arcos) HECHA, sin probar aún por Mikel.
 Fase 8 (rediseño de la interfaz: pasos en barra lateral, aspecto profesional) HECHA, sin probar aún por Mikel.
 Fase 9 (perfiles de cálculo: tiempo automático Rápido/Normal/Fino o fijo) HECHA, sin probar aún por Mikel.
+Fase 10 (modo rellenar la plancha: juegos en proporción + relleno) HECHA, sin probar aún por Mikel.
 `python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
 no está PySide6). Pendiente: DXF reales de su CAD.
 
@@ -38,6 +39,8 @@ nesting2d/
                          — probado con DXF sintéticos; FALTAN DXF reales del CAD
   engine/params.py       NestParams (parámetros de proyecto); time_limit None = automático
   engine/timing.py       tiempo por plancha: automático (copias × rotaciones × finura) o fijo
+  engine/fill.py         modo rellenar: máximo de juegos (proporción) en UNA plancha por tanteo
+                         (intentos de 10 s, a saltos y por mitades) + sueltas de una referencia
   engine/part_in_part.py relleno voraz de huecos antes del motor
   engine/nester.py       capa sobre spyrrow: márgenes, lado de compactación, varias planchas
   validate.py            solapes, separación, margen (lo usará la edición manual)
@@ -198,7 +201,10 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 - Salidas: DXF por plancha + PDF de taller + proyecto .json.
 - Fuera de alcance v1: G-code/CAM, DWG nativo, PDF escaneado, vinilo de rollo.
   v2: fijar piezas y recalcular, pieza en pieza recursiva/global, espejo
-  automático, modo rellenar, retales.
+  automático, retales. (El modo rellenar se adelantó: ver fase 10.)
+- Modo rellenar (Mikel, 15/10/2026): la cantidad se lee como PROPORCIÓN, juegos
+  completos en UNA plancha y el hueco con sueltas de UNA referencia elegida;
+  intentos de 10 s y colocación final con el perfil de cálculo; «caben al menos N».
 
 ## Plan por fases
 1. ~~Núcleo~~ (hecho).
@@ -234,6 +240,9 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
    lógica de nesting.
 9. ~~Perfiles de cálculo~~ (hecho, 15/10/2026, a petición de Mikel): medición del motor
    (`docs/medicion_motor.md`) y tiempo automático Rápido/Normal/Fino o fijo.
+10. ~~Modo rellenar la plancha~~ (hecho, 15/10/2026, a petición de Mikel; era v2):
+   «Qué calcular» en el paso 2, columna Proporción, relleno con una referencia,
+   resumen en el resultado y en el PDF, `nest --rellenar --relleno`.
 
 ## Pendientes abiertos
 - Separación y margen reales: los dirá el proveedor de la mica.

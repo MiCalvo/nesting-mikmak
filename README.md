@@ -115,6 +115,14 @@ oculto y se abre solo cuando hay un aviso (o desde Ver › Mensajes).
    tus ediciones). Archivo → Abrir reciente; también puedes arrastrar PDF, DXF o
    proyectos a la ventana.
 
+**Rellenar la plancha** (paso 2 → «Qué calcular»): en vez de colocar las
+cantidades pedidas, busca cuántos **juegos** caben en una plancha. La columna
+«Cantidad» pasa a ser «Proporción» (2, 1, 1 = juegos de 2 de la primera y 1 de
+cada otra; 0 = fuera) y el hueco que quede se rellena con piezas sueltas de la
+referencia que elijas. Hace varios intentos de 10 s y la colocación final con
+el perfil de cálculo (normalmente 1–3 minutos). El resultado es «caben al menos
+N juegos»: con más tiempo quizá entre alguna más.
+
 **Perfiles de material** (paso 2): plantillas con plancha,
 separación, margen, material y espesor. «Guardar como perfil…» guarda los
 valores actuales; al crear un proyecto nuevo se elige perfil.
@@ -134,6 +142,12 @@ Calcular el nesting del primer proyecto (16 juntas):
 
 ```
 python -m nesting2d nest "datos_prueba\RIGCCP*.pdf" --cantidad RIGCCP0020=4 RIGCCP0019=4 RIGCCP0018=4 RIGCCP0016=2 RIGCCP0017=2 --plancha 1200x1000 --separacion 5 --margen 5 --salida salida
+```
+
+Rellenar una plancha (las cantidades se leen como proporción):
+
+```
+python -m nesting2d nest datos_prueba\RIGCCP0019.pdf datos_prueba\RIGCCP0018.pdf datos_prueba\RIGCCP0016.pdf --cantidad RIGCCP0019=2 RIGCCP0018=1 RIGCCP0016=1 --rellenar --relleno RIGCCP0016 --salida salida
 ```
 
 Tiempo de cálculo: automático por defecto (`--finura rapido|normal|fino`), o

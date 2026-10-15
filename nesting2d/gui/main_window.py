@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QButtonGroup, QDockWidget, QFileDialog, QHBoxLayo
                                QToolButton, QVBoxLayout, QWidget)
 
 from .. import project
+from ..engine.fill import describe_fill
 from ..engine.nester import Layout
 from ..engine.params import NestParams
 from ..engine.timing import describe
@@ -45,7 +46,7 @@ PHASES = {"exploring": "explorando", "compressing": "compactando", "final": "ter
 STEP_TITLES = ["Piezas", "Material y parámetros", "Resultado", "Exportar"]
 STEP_TEXTS = [
     ("Piezas", "Importa los planos (PDF, DXF o imagen), comprueba la escala de cada pieza y pon cuántas "
-               "copias hay que cortar."),
+               "copias hay que cortar (en el modo «Rellenar la plancha», la proporción de cada una)."),
     ("Material y parámetros", "Tamaño de la plancha, separación entre piezas, margen al borde y cómo puede "
                               "girar el motor las piezas."),
     ("Resultado", "Revisa la colocación. Puedes mover y girar piezas a mano; los problemas se marcan en rojo "
@@ -281,6 +282,7 @@ class MainWindow(QMainWindow):
     def _refresh_steps(self):
         """Estado de cada paso en la barra lateral y comprobaciones de la página Exportar."""
         self.params_panel.refresh_estimate()     # depende de las copias y rotaciones de las piezas
+        self._apply_mode()                       # también tras abrir un proyecto (set_params no avisa)
         parts = self.model.parts
         copies = sum(p.quantity for p in parts)
         s1, s2, s3, s4 = self.steps
@@ -288,6 +290,9 @@ class MainWindow(QMainWindow):
             s1.set_status("Importa los planos", "todo")
         elif copies == 0:
             s1.set_status(f"{len(parts)} piezas · todas con cantidad 0", "warn")
+        elif self.parts_tab.fill_mode:
+            ratio = ":".join(str(q.quantity) for q in parts if q.quantity > 0)
+            s1.set_status(f"Rellenar en proporción {ratio}", "done")
         else:
             s1.set_status(f"{len(parts)} pieza{'s' if len(parts) != 1 else ''} · "
                           f"{copies} copia{'s' if copies != 1 else ''}", "done")
@@ -308,6 +313,10 @@ class MainWindow(QMainWindow):
             s3.set_status(f"{issues} problema(s) de validación", "bad")
         elif unplaced:
             s3.set_status(f"Faltan {unplaced} pieza(s)", "bad")
+        elif L.fill is not None:
+            k, j = L.fill.get("sets", 0), L.fill.get("extra", 0)
+            s3.set_status(f"Caben {k} juego{'s' if k != 1 else ''}" + (f" + {j} sueltas" if j else ""),
+                          "warn" if rot or not (k or j) else "done")
         else:
             n = L.sheets
             s3.set_status(f"{len(L.placements)} piezas en {n} plancha{'s' if n != 1 else ''}",
@@ -450,9 +459,16 @@ class MainWindow(QMainWindow):
         self.result_panel.refresh_warnings()   # las rotaciones permitidas pueden haber cambiado
 
     def _on_params_changed(self, affects_layout: bool):
+        self._apply_mode()
         self._set_modified()
         if affects_layout:
             self._mark_stale()
+
+    def _apply_mode(self):
+        """Cantidades fijas o rellenar la plancha: la columna «Cantidad» pasa a «Proporción»."""
+        filling = self.params_panel.goal.currentData() == "rellenar"
+        if filling != self.parts_tab.fill_mode:
+            self.parts_tab.set_fill_mode(filling)
 
     def _set_layout(self, layout: Layout | None, issues=None, stale=False, engine: Layout | None = None):
         self.layout_ = layout
@@ -772,17 +788,24 @@ class MainWindow(QMainWindow):
     def start_nest(self):
         if self.nest_worker is not None:
             return
-        parts = [p for p in self.model.parts if p.quantity > 0]
-        if not parts:
-            self._warn("No hay piezas con cantidad mayor que 0.")
-            return
         params = self.params_panel.params()
+        filling = params.mode == "rellenar"
+        parts = [p for p in self.model.parts if p.quantity > 0 or (filling and p.name == params.fill_with)]
+        if not parts:
+            self._warn("No hay piezas con proporción mayor que 0 ni referencia para rellenar." if filling else
+                       "No hay piezas con cantidad mayor que 0.")
+            return
         if params.sheet_width <= 2 * params.margin or params.sheet_height <= 2 * params.margin:
             self._warn("El margen es demasiado grande para la plancha.")
             return
         total = sum(p.quantity for p in parts)
-        self.log(f"Calculando {total} piezas · tiempo {describe(params.time_limit, params.fineness)}"
-                 f" (≈ {self.params_panel.refresh_estimate()} s la primera plancha)…")
+        if filling:
+            ratio = " : ".join(f"{p.quantity} {p.name}" for p in parts if p.quantity > 0)
+            self.log(f"Rellenar la plancha: buscando cuántos juegos caben (proporción {ratio or '—'})"
+                     + (f", hueco con {params.fill_with}" if params.fill_with else "") + "…")
+        else:
+            self.log(f"Calculando {total} piezas · tiempo {describe(params.time_limit, params.fineness)}"
+                     f" (≈ {self.params_panel.refresh_estimate()} s la primera plancha)…")
         self._edited_while_running = False
         self._stop_requested = False
         self._drain = None
@@ -790,6 +813,8 @@ class MainWindow(QMainWindow):
         self._phase = ""
         self.nest_worker = NestWorker(parts, params, self)
         self.nest_worker.sheet_started.connect(self._sheet_started)
+        self.nest_worker.probe.connect(self._on_probe)
+        self._probe_text = ""
         self.nest_worker.done.connect(self._nest_done)
         self.nest_worker.failed.connect(self._nest_failed)
         self.nest_worker.finished.connect(self._nest_finished)
@@ -831,8 +856,22 @@ class MainWindow(QMainWindow):
         best = f" · mejor largo {fmt(self._best)} mm" if self._best is not None else ""
         phase = f" · {self._phase}" if self._phase else ""
         self.status.setText(f"Calculando plancha {self._sheet + 1}{phase}{best} · {int(elapsed)} / {limit} s")
+        if self.nest_worker.params.mode == "rellenar":
+            self.status.setText(f"Rellenar la plancha · {int(elapsed)} / {limit} s · {self._probe_text}")
+            self.run_label.setText(f"Buscando cuántos caben · {int(elapsed)} / {limit} s"
+                                   + (f"\n{self._probe_text}" if self._probe_text else ""))
+            return
         self.run_label.setText(f"Plancha {self._sheet + 1}{phase} · {int(elapsed)} / {limit} s"
                                + (f"\nMejor largo: {fmt(self._best)} mm" if self._best is not None else ""))
+
+    def _on_probe(self, k: int, j: int, ok: bool, final: bool):
+        what = f"{k} juego{'s' if k != 1 else ''}" + (f" + {j} sueltas" if j else "")
+        if final:
+            text = f"Colocación final ({what}): {'hecha' if ok else 'no mejora; se usa la del intento'}"
+        else:
+            text = f"Intento: {what} → {'caben' if ok else 'no caben'}"
+        self._probe_text = text
+        self.log(text)
 
     def _nest_done(self, layout: Layout, issues):
         stale = self._edited_while_running
@@ -848,6 +887,9 @@ class MainWindow(QMainWindow):
                      f"aprovechamiento {fmt(100 * st['utilization'])} %")
         if issues:
             self.log(f"ERROR de validación: {len(issues)} problemas (piezas en rojo).")
+        if layout.fill is not None:
+            self.log(f"Rellenar: caben al menos {describe_fill(layout.fill)} "
+                     f"({layout.fill.get('tries', 0)} cálculos).")
         if layout.unplaced:
             self._warn("Hay piezas sin colocar: " + ", ".join(f"{n} × {k}" for k, n in sorted(layout.unplaced.items())))
         if stale:

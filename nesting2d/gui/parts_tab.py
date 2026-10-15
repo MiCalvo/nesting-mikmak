@@ -72,6 +72,7 @@ class PartsTab(QWidget):
         super().__init__(parent)
         self.model = model
         self._syncing = False
+        self.fill_mode = False      # modo rellenar: la cantidad es la proporción de cada referencia
 
         # --- tabla -------------------------------------------------------------
         self.table = QTableView()
@@ -147,7 +148,8 @@ class PartsTab(QWidget):
         foot = QHBoxLayout()
         self.totals = style.label("", "muted")
         foot.addWidget(self.totals, 1)
-        foot.addWidget(QLabel("Cantidad:"))
+        self.qty_caption = QLabel("Cantidad:")
+        foot.addWidget(self.qty_caption)
         foot.addWidget(self.qty)
         foot.addWidget(self.b_qty)
         foot.addSpacing(8)
@@ -278,9 +280,15 @@ class PartsTab(QWidget):
         self.stack.setCurrentIndex(1 if parts else 0)
         copies = sum(p.quantity for p in parts)
         zero = sum(1 for p in parts if p.quantity == 0)
-        text = f"{len(parts)} piezas distintas · {copies} copias a cortar"
-        if zero:
-            text += f" · {zero} con cantidad 0 (no se calculan)"
+        if self.fill_mode:
+            ratio = ":".join(str(p.quantity) for p in parts if p.quantity > 0) or "—"
+            text = f"{len(parts)} piezas · juegos en proporción {ratio}"
+            if zero:
+                text += f" · {zero} fuera (proporción 0)"
+        else:
+            text = f"{len(parts)} piezas distintas · {copies} copias a cortar"
+            if zero:
+                text += f" · {zero} con cantidad 0 (no se calculan)"
         self.totals.setText(text if parts else "")
         rows = self.selected_rows()
         one = len(rows) == 1
@@ -306,6 +314,17 @@ class PartsTab(QWidget):
             self.p_title.setText("Selecciona una pieza de la lista." if parts else
                                  "Aquí verás las medidas, la escala y la cantidad de la pieza elegida.")
             self.p_title.show()
+
+    def set_fill_mode(self, on: bool) -> None:
+        """Modo rellenar: la cantidad pasa a ser la proporción de cada referencia en el juego."""
+        self.fill_mode = on
+        word = "Proporción" if on else "Cantidad"
+        self.model.set_quantity_label(word)
+        self.qty_caption.setText(word + ":")
+        lab = self.form.labelForField(self.p_qty)
+        if lab is not None:
+            lab.setText(word)
+        self._refresh()
 
     def _fill_props(self, p) -> None:
         self._syncing = True

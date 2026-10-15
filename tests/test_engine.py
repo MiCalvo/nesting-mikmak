@@ -79,3 +79,37 @@ def test_nest_auto_time_per_sheet(gaskets):
     layout = nest(gaskets, NestParams(fineness="rapido", seed=1, part_in_part=False),
                   on_sheet=lambda s, drain: calls.append(drain.time_limit))
     assert layout.sheet_times == calls == [auto_time(5, 1, "rapido")] == [5]
+
+
+def test_fill_maximize_search():
+    from nesting2d.engine.fill import _maximize
+    for true_max, start, cap in [(79, 76, 165), (21, 23, 40), (1, 5, 9), (0, 3, 10), (10, 2, 10)]:
+        seen = []
+
+        def test(n):
+            seen.append(n)
+            return n <= true_max, n
+        n, data = _maximize(test, start, cap, None)
+        assert n == true_max and (data == n or n == 0)
+        assert len(seen) <= 12
+
+
+def test_fill_sheet_sets_and_filler(gaskets):
+    """Rellenar: juegos completos en proporción y luego sueltas de la referencia elegida."""
+    from collections import Counter
+
+    from nesting2d.engine.fill import describe_fill, fill_sheet
+    a, b = gaskets[1], gaskets[3]          # RIGCCP0019 (167 × 92) y RIGCCP0016 (124 × 73)
+    a.quantity, b.quantity = 2, 1
+    params = NestParams(sheet_width=500, sheet_height=400, time_limit=2, seed=1, part_in_part=False,
+                        mode="rellenar", fill_with=b.name)
+    probes = []
+    L = fill_sheet([a, b], params, on_probe=lambda k, j, ok, final: probes.append((k, j, ok)))
+    f = L.fill
+    k, j = f["sets"], f["extra"]
+    assert k >= 1 and L.sheets == 1 and L.unplaced == {}
+    assert Counter(q.part for q in L.placements) == {a.name: 2 * k, b.name: k + j}
+    assert check_layout(L) == []
+    assert (k, 0, True) in probes and (k + 1, 0, False) in probes          # el siguiente juego no cabe
+    assert describe_fill(f).startswith(f"{k} juego")
+    assert L.params.mode == "rellenar"

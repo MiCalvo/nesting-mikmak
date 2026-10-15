@@ -35,6 +35,7 @@ def _layout_to_dict(layout: Layout) -> dict:
         "sheets": layout.sheets,
         "unplaced": layout.unplaced,
         "warnings": layout.warnings,
+        "fill": layout.fill,
         "placements": [{
             "part": q.part, "sheet": q.sheet, "angle": q.angle, "host": q.host,
             "polygon": q.polygon.wkt,
@@ -44,7 +45,7 @@ def _layout_to_dict(layout: Layout) -> dict:
 
 def _layout_from_dict(L: dict, params: NestParams) -> Layout:
     return Layout(params=params, sheets=L["sheets"], unplaced=L.get("unplaced", {}),
-                  warnings=L.get("warnings", []),
+                  warnings=L.get("warnings", []), fill=L.get("fill"),
                   placements=[Placement(q["part"], q["sheet"], q["angle"],
                                         wkt.loads(q["polygon"]), q.get("host"))
                               for q in L["placements"]])

@@ -108,6 +108,8 @@ QWidget#footer {{ background: {SURFACE}; border-top: 1px solid {BORDER}; }}
 /* avisos */
 QLabel#banner {{ background: {WARN_SOFT}; color: #5c4400; border: 1px solid #ecd18a; border-radius: 6px;
                padding: 8px 10px; }}
+QLabel#infoBanner {{ background: {ACCENT_SOFT}; color: #173a7a; border: 1px solid #b9cff7; border-radius: 6px;
+               padding: 8px 10px; }}
 QStatusBar {{ background: {SURFACE}; color: {MUTED}; border-top: 1px solid {BORDER}; }}
 QStatusBar QPushButton {{ padding: 2px 10px; }}
 QToolTip {{ background: {TEXT}; color: white; border: none; padding: 4px 6px; }}

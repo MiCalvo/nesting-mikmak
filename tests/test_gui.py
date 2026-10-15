@@ -805,3 +805,41 @@ def test_calc_profile_in_params_panel(qapp, window, tmp_path):
     w.modified = False
     assert w.open_project(f)
     assert pp.calc_mode.currentData() == "rapido" and pp.params().time_limit is None
+
+
+def test_fill_mode_from_window(qapp, window, tmp_path, gaskets):
+    """Rellenar la plancha desde la ventana: proporción, relleno, resumen y proyecto."""
+    from nesting2d.gui.parts_model import COL_QTY
+    w = window
+    pp = w.params_panel
+    a, b = gaskets[1], gaskets[3]
+    a.quantity, b.quantity = 2, 1
+    w.model.set_parts([a, b])
+    pp.goal.setCurrentIndex(pp.goal.findData("rellenar"))
+    assert w.parts_tab.fill_mode and w.model.headerData(COL_QTY, Qt.Orientation.Horizontal) == "Proporción"
+    assert pp.fill_with.isEnabled() and pp.fill_with.count() == 3          # «Nada» + las dos piezas
+    w.parts_tab.select_row(0)                  # refrescar la tarjeta de propiedades no debe quitar el modo
+    assert w.parts_tab.fill_mode and w.steps[0].subtitle == "Rellenar en proporción 2:1"
+    pp.fill_with.setCurrentIndex(pp.fill_with.findData(b.name))
+    pp.fill_with.activated.emit(pp.fill_with.currentIndex())
+    pp.width.setValue(500)
+    pp.height.setValue(400)
+    pp.part_in_part.setChecked(False)
+    pp.calc_mode.setCurrentIndex(pp.calc_mode.findData("fijo"))
+    pp.time_limit.setValue(2)
+    p = pp.params()
+    assert (p.mode, p.fill_with) == ("rellenar", b.name)
+    w.start_nest()
+    wait_until(qapp, lambda: w.nest_worker is None, timeout=300)
+    L = w.layout_
+    k = L.fill["sets"]
+    assert k >= 1 and L.unplaced == {} and w.result_panel.issues == []
+    assert w.result_panel.fill_info.isVisible() and "juego" in w.result_panel.fill_info.text()
+    assert w.steps[2].subtitle.startswith("Caben")
+    f = tmp_path / "r.json"
+    assert w._save_to(f)
+    pp.goal.setCurrentIndex(pp.goal.findData("cantidades"))
+    assert not w.parts_tab.fill_mode
+    w.modified = False
+    assert w.open_project(f)
+    assert w.parts_tab.fill_mode and w.layout_.fill["sets"] == k and pp.params().fill_with == b.name

@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout
                                QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..engine.params import SIDES, NestParams
-from ..engine.timing import MAX_TIME, rotation_factor, sheet_time
+from ..engine.fill import PROBE_TIME
+from ..engine.timing import MAX_TIME, describe, rotation_factor, sheet_time
 from ..importers.contours import ImportOptions
 from ..profiles import Profile, load_profiles, save_profiles
 from . import style
@@ -103,6 +104,23 @@ class ParamsPanel(QWidget):
         seed_row = QHBoxLayout()
         seed_row.addWidget(self.fix_seed)
         seed_row.addWidget(self.seed, 1)
+        # --- qué calcular ------------------------------------------------------------
+        self.goal = QComboBox()
+        self.goal.addItem("Cantidades fijas (las de cada pieza)", "cantidades")
+        self.goal.addItem("Rellenar la plancha (máximo de juegos)", "rellenar")
+        self.fill_with = QComboBox()
+        self._fill_wanted: str | None = None
+        self._fill_names: list[str] | None = None
+        goal_box = QGroupBox("Qué calcular")
+        gf = QFormLayout(goal_box)
+        gf.addRow("Modo:", self.goal)
+        gf.addRow("Rellenar el hueco con:", self.fill_with)
+        self.goal_hint = QLabel()
+        self.goal_hint.setWordWrap(True)
+        self.goal_hint.setObjectName("muted")
+        gf.addRow(self.goal_hint)
+        self.goal_box = goal_box
+
         nest_box = QGroupBox("Nesting")
         f = QFormLayout(nest_box)
         f.addRow("Rotaciones permitidas:", self.rotation)
@@ -172,6 +190,7 @@ class ParamsPanel(QWidget):
         left.addWidget(sheet)
         left.addWidget(mat)
         left.addStretch(1)
+        right.addWidget(goal_box)
         right.addWidget(nest_box)
         right.addWidget(imp)
         right.addStretch(1)
@@ -193,6 +212,8 @@ class ParamsPanel(QWidget):
         for w in (self.max_sheets, self.time_limit, self.seed):
             w.valueChanged.connect(lambda *_: self._emit(True))
         self.calc_mode.currentIndexChanged.connect(lambda *_: self._emit(True))
+        self.goal.currentIndexChanged.connect(lambda *_: self._emit(True))
+        self.fill_with.activated.connect(self._fill_with_chosen)
         for w in (self.rotation, self.side):
             w.currentIndexChanged.connect(lambda *_: self._emit(True))
         self.part_in_part.toggled.connect(lambda *_: self._emit(True))
@@ -211,11 +232,41 @@ class ParamsPanel(QWidget):
         if not self._loading:
             self.changed.emit(affects)
 
+    def _fill_with_chosen(self, *_):
+        self._fill_wanted = self.fill_with.currentData()
+        self._emit(True)
+
+    def refresh_parts(self) -> None:
+        """Lista de referencias para rellenar el hueco (cambia al importar o renombrar piezas)."""
+        names = [q.name for q in self.parts_fn()]
+        if names != self._fill_names:
+            self._fill_names = names
+            self.fill_with.blockSignals(True)
+            self.fill_with.clear()
+            self.fill_with.addItem("Nada: solo juegos completos", None)
+            for n in names:
+                self.fill_with.addItem(n, n)
+            self.fill_with.setCurrentIndex(max(0, _find_data(self.fill_with, self._fill_wanted)))
+            self.fill_with.blockSignals(False)
+        filling = self.goal.currentData() == "rellenar"
+        self.fill_with.setEnabled(filling)
+        self.goal_hint.setText(
+            "Las cantidades de las piezas se leen como PROPORCIÓN (2, 1, 1 = juegos de 2 de la primera y 1 de "
+            "cada otra) y se busca cuántos juegos completos caben en UNA plancha; después, el hueco que quede se "
+            f"rellena con la referencia elegida. Varios intentos de {PROBE_TIME} s y la colocación final con el "
+            "perfil de cálculo. Resultado: «caben al menos N»." if filling else
+            "Se colocan las cantidades pedidas de cada pieza, en tantas planchas como haga falta.")
+
     def refresh_estimate(self) -> int | None:
         """Pone (y devuelve) los segundos estimados para la primera plancha."""
+        self.refresh_parts()
         fixed = self.calc_mode.currentData() == "fijo"
         self.time_limit.setEnabled(fixed)
         p = self.params()
+        if p.mode == "rellenar":
+            self.time_estimate.setText(f"Rellenar: intentos de {PROBE_TIME} s (normalmente entre 5 y 15) y "
+                                       f"colocación final «{describe(p.time_limit, p.fineness)}».")
+            return None
         items = [(q.quantity, q.rotations if q.rotations is not None else p.angles())
                  for q in self.parts_fn() if q.quantity > 0]
         secs = sheet_time(p.time_limit, p.fineness, items)
@@ -246,7 +297,8 @@ class ParamsPanel(QWidget):
             fineness=(self.calc_mode.currentData() if self.calc_mode.currentData() != "fijo"
                       else self._base.fineness),
             seed=self.seed.value() if self.fix_seed.isChecked() else None,
-            material=self.material.text(), thickness=self.thickness.text())
+            material=self.material.text(), thickness=self.thickness.text(),
+            mode=self.goal.currentData(), fill_with=self._fill_wanted)
 
     def set_params(self, p: NestParams) -> None:
         self._loading = True
@@ -264,6 +316,9 @@ class ParamsPanel(QWidget):
             self.rotation.setCurrentIndex(i)
             self.part_in_part.setChecked(p.part_in_part)
             self.side.setCurrentIndex(max(0, _find_data(self.side, p.compact_side)))
+            self.goal.setCurrentIndex(max(0, _find_data(self.goal, p.mode)))
+            self._fill_wanted = p.fill_with
+            self._fill_names = None          # rehacer la lista con la selección guardada
             mode = "fijo" if p.time_limit is not None else p.fineness
             self.calc_mode.setCurrentIndex(max(0, _find_data(self.calc_mode, mode)))
             if p.time_limit is not None:

@@ -103,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--finura", choices=list(FINENESS), default="normal",
                    help="modo automático: rapido, normal (por defecto) o fino")
     b.add_argument("--semilla", type=int, default=None)
+    b.add_argument("--rellenar", action="store_true",
+                   help="máximo de juegos en UNA plancha; --cantidad se lee como proporción")
+    b.add_argument("--relleno", default=None, metavar="NOMBRE",
+                   help="con --rellenar: referencia para el hueco que dejen los juegos completos")
     b.add_argument("--etiquetas", action="store_true", help="añade la capa ETIQUETAS al DXF")
     b.add_argument("--pdf-taller", action="store_true", help="genera también el PDF de taller (necesita PySide6)")
     b.add_argument("--arcos", action="store_true", help="DXF con arcos y círculos en vez de segmentos")
@@ -152,13 +156,24 @@ def main(argv: list[str] | None = None) -> int:
         rotation_step=None if args.rotacion == "libre" else float(args.rotacion),
         part_in_part=not args.sin_pieza_en_pieza, compact_side=args.lado,
         time_limit=args.tiempo, fineness=args.finura, seed=args.semilla,
-        material=args.material, thickness=args.espesor)
+        material=args.material, thickness=args.espesor,
+        mode="rellenar" if args.rellenar else "cantidades", fill_with=args.relleno)
+    if args.relleno and args.relleno not in {p.name for p in parts}:
+        print(f"--relleno: no hay ninguna pieza llamada {args.relleno}", file=sys.stderr)
+        return 1
     total = sum(p.quantity for p in parts)
-    est = sheet_time(params.time_limit, params.fineness,
-                     [(p.quantity, p.rotations if p.rotations is not None else params.angles()) for p in parts])
-    print(f"Calculando {total} piezas, tiempo {describe(params.time_limit, params.fineness)}: "
-          f"~{est} s la primera plancha…")
-    layout = nest(parts, params)
+    if args.rellenar:
+        from .engine.fill import describe_fill, fill_sheet
+        print("Rellenar: buscando cuántos juegos caben en una plancha…")
+        layout = fill_sheet(parts, params, on_probe=lambda k, j, ok, final: print(
+            f"  {'final' if final else 'intento'}: {k} juegos + {j} sueltas -> {'caben' if ok else 'no caben'}"))
+        print(f"Caben al menos {describe_fill(layout.fill)}")
+    else:
+        est = sheet_time(params.time_limit, params.fineness,
+                         [(p.quantity, p.rotations if p.rotations is not None else params.angles()) for p in parts])
+        print(f"Calculando {total} piezas, tiempo {describe(params.time_limit, params.fineness)}: "
+              f"~{est} s la primera plancha…")
+        layout = nest(parts, params)
 
     out = Path(args.salida)
     out.mkdir(parents=True, exist_ok=True)

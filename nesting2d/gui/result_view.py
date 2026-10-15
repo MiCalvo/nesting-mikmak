@@ -27,6 +27,7 @@ from shapely.geometry import Polygon, box
 from shapely.ops import polylabel
 
 from .. import editing
+from ..engine.fill import describe_fill
 from ..engine.nester import Layout, free_rect  # noqa: F401  (free_rect: la usan las pruebas)
 from ..validate import Issue, check, check_layout
 from . import style
@@ -320,6 +321,9 @@ class ResultPanel(QWidget):
         self.stale = style.label("El resultado no corresponde a los datos actuales: has cambiado piezas o "
                                  "parámetros después de calcular. Vuelve a calcular (F5).", "banner", wrap=True)
         self.stale.hide()
+        self.fill_info = style.label("", "infoBanner", wrap=True)   # modo rellenar: cuántos juegos caben
+        self.fill_info.setTextFormat(Qt.TextFormat.RichText)
+        self.fill_info.hide()
 
         # --- barra de la vista ---------------------------------------------------
         self.sheet_combo = QComboBox()
@@ -460,6 +464,7 @@ class ResultPanel(QWidget):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
         lay.addWidget(self.stale)
+        lay.addWidget(self.fill_info)
         lay.addWidget(self.split, 1)
 
         self.view.drag_set_fn = self._drag_set
@@ -735,7 +740,7 @@ class ResultPanel(QWidget):
         self._labels_cache.clear()
         if layout is not None and engine is None:
             engine = Layout(layout.params, list(layout.placements), layout.sheets,
-                            dict(layout.unplaced), list(layout.warnings))
+                            dict(layout.unplaced), list(layout.warnings), fill=layout.fill)
         self.engine = engine
         self.stale.hide()
         names = sorted({q.part for q in layout.placements}) if layout else []
@@ -840,8 +845,11 @@ class ResultPanel(QWidget):
                 x0, y0, x1, y1 = fr
                 sc.addRect(QRectF(x0, -y1, x1 - x0, y1 - y0), _pen("#2ea043", 1, Qt.PenStyle.DashLine),
                            QBrush(FREE_FILL))
-                sc.addItem(_centered_text(f"Retal libre {fmt(x1 - x0, 0)} × {fmt(y1 - y0, 0)} mm",
-                                          (x0 + x1) / 2, -(y0 + y1) / 2, QColor(style.OK), 9))
+                t = _centered_text(f"Retal libre {fmt(x1 - x0, 0)} × {fmt(y1 - y0, 0)} mm",
+                                   (x0 + x1) / 2, -(y0 + y1) / 2, QColor(style.OK), 9)
+                sc.addItem(t)
+                # como los nombres: solo se ve si cabe dentro del retal (si no, pisaría piezas)
+                self.view.labels.append((t, box(x0, y0, x1, y1), ((x0 + x1) / 2, (y0 + y1) / 2)))
 
         self.view.bad = {i for iss in self.issues for i in iss.items if L.placements[i].sheet == s}
         for i, q in enumerate(L.placements):
@@ -876,6 +884,10 @@ class ResultPanel(QWidget):
         self.problems.clear()
         self.b_prev.setEnabled(L is not None and self.current_sheet() > 0)
         self.b_next.setEnabled(L is not None and self.current_sheet() < L.sheets - 1)
+        self.fill_info.setVisible(L is not None and L.fill is not None)
+        if L is not None and L.fill is not None:
+            self.fill_info.setText(f"<b>Rellenar la plancha:</b> caben al menos {describe_fill(L.fill)}. "
+                                   "«Al menos»: con más tiempo de cálculo quizá entre alguna más.")
         if L is None:
             self.summary.setText("Todavía no hay resultado. Importa piezas y pulsa «Calcular» (F5).")
             self.problems_card.hide()

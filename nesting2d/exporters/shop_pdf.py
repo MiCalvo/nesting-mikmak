@@ -145,6 +145,9 @@ def export_shop_pdf(layout: Layout, parts: list[Part], path: str | Path, title: 
         ("Separación entre piezas", f"{_num(p.separation, 2)} mm"), ("Margen al borde", f"{_num(m, 2)} mm"),
         ("Piezas colocadas", str(len(layout.placements))),
     ]
+    if layout.fill is not None:     # modo rellenar
+        from ..engine.fill import describe_fill
+        info.append(("Rellenar plancha", "caben al menos " + describe_fill(layout.fill)))
     for label, val in info:
         text(MARGIN, y, f"{label}:", 3, True, width=50)
         text(MARGIN + 50, y, val, 3, width=120)
@@ -153,7 +156,8 @@ def export_shop_pdf(layout: Layout, parts: list[Part], path: str | Path, title: 
     placed = Counter(q.part for q in layout.placements)
     sheet_cols = [(f"Pl. {s + 1}", 14.0, AR) for s in range(min(layout.sheets, 8))]
     cols = [("Nº", 10.0, AR), ("Pieza", 70.0, AL), ("Medidas (mm)", 32.0, AR),
-            ("Pedidas", 18.0, AR), ("Colocadas", 20.0, AR)] + sheet_cols
+            ("Proporción" if layout.fill is not None else "Pedidas", 18.0, AR),
+            ("Colocadas", 20.0, AR)] + sheet_cols
     if layout.sheets > 8:
         cols.append(("Resto pl.", 18.0, AR))
     rows = []

@@ -19,6 +19,8 @@ class NestParams:
     compact_side: str = "izquierda"
     time_limit: int | None = None     # s de cálculo POR PLANCHA; None = automático (engine/timing.py)
     fineness: str = "normal"          # modo automático: "rapido", "normal" o "fino"
+    mode: str = "cantidades"          # "cantidades" (las pedidas) o "rellenar" (máximo en UNA plancha)
+    fill_with: str | None = None      # rellenar: referencia para el hueco que dejen los juegos
     seed: int | None = None           # fijarla repite el mismo resultado
     workers: int | None = None        # hilos del motor; None = todos los núcleos
     material: str = ""                # informativo (PDF de taller)

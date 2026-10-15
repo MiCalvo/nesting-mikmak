@@ -53,6 +53,7 @@ class PartsModel(QAbstractTableModel):
         # id(pieza) -> (pieza, espejo, icono); se guarda la pieza para no confundir
         # una pieza borrada con otra nueva que reutilice el mismo id()
         self._icons: dict[int, tuple[Part, bool, object]] = {}
+        self.qty_label = HEADERS[COL_QTY]   # «Proporción» en el modo rellenar
 
     # --- API ------------------------------------------------------------------
     def set_parts(self, parts: list[Part]) -> None:
@@ -117,8 +118,13 @@ class PartsModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return HEADERS[section]
+            return self.qty_label if section == COL_QTY else HEADERS[section]
         return None
+
+    def set_quantity_label(self, text: str) -> None:
+        if text != self.qty_label:
+            self.qty_label = text
+            self.headerDataChanged.emit(Qt.Orientation.Horizontal, COL_QTY, COL_QTY)
 
     def flags(self, index):
         f = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable

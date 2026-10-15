@@ -1,7 +1,10 @@
-"""Ventana principal (fase 2: interfaz básica).
+"""Ventana principal.
 
-Pestañas: Piezas · Parámetros · Resultado. Abajo, un panel de mensajes con los
-avisos de importación y del motor.
+A la izquierda, los pasos del trabajo (1 Piezas · 2 Material y parámetros ·
+3 Resultado · 4 Exportar) con su estado y el botón «Calcular nesting», siempre a
+mano. Arriba, el título y una línea de ayuda del paso; abajo, «Anterior» y
+«Siguiente». El panel de mensajes (avisos de importación y del motor) se abre
+solo cuando hay algo que leer, o desde Ver › Mensajes.
 """
 from __future__ import annotations
 
@@ -10,8 +13,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QDockWidget, QFileDialog, QInputDialog, QLabel, QMainWindow, QMessageBox,
-                               QPlainTextEdit, QProgressBar, QTabWidget)
+from PySide6.QtWidgets import (QButtonGroup, QDockWidget, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
+                               QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QStackedWidget,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from .. import project
 from ..engine.nester import Layout
@@ -20,13 +24,16 @@ from ..exporters.dxf_export import export_sheet
 from ..exporters.shop_pdf import export_shop_pdf
 from ..validate import check_layout
 from ..importers.image_import import is_image
+from . import style
 from .contour_dialog import ContourDialog, LayerDialog
+from .export_panel import ExportPanel
 from .image_dialog import ImageContourDialog
 from .params_panel import ParamsPanel
 from .parts_model import PartsModel
 from .parts_tab import PartsTab
 from .qt_util import fmt
 from .result_view import ResultPanel
+from .steps import StepButton
 from .workers import ImportWorker, NestWorker
 
 APP_NAME = "Nesting 2D"
@@ -34,12 +41,28 @@ IMPORT_FILTER = ("Planos e imágenes (*.pdf *.dxf *.dwg *.png *.jpg *.jpeg *.bmp
                  "PDF (*.pdf);;DXF (*.dxf);;Imágenes (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;Todos (*)")
 MAX_RECENT = 8
 PHASES = {"exploring": "explorando", "compressing": "compactando", "final": "terminando"}
+STEP_TITLES = ["Piezas", "Material y parámetros", "Resultado", "Exportar"]
+STEP_TEXTS = [
+    ("Piezas", "Importa los planos (PDF, DXF o imagen), comprueba la escala de cada pieza y pon cuántas "
+               "copias hay que cortar."),
+    ("Material y parámetros", "Tamaño de la plancha, separación entre piezas, margen al borde y cómo puede "
+                              "girar el motor las piezas."),
+    ("Resultado", "Revisa la colocación. Puedes mover y girar piezas a mano; los problemas se marcan en rojo "
+                  "y se comprueban en vivo."),
+    ("Exportar", "Comprueba que todo está bien y genera los DXF por plancha y el PDF de taller."),
+]
+
+
+def _num(v: float) -> str:
+    """Número corto para la barra lateral: sin decimales si es entero (5, 1200; 2,5)."""
+    return fmt(v, 0) if abs(v - round(v)) < 1e-9 else fmt(v, 1)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.resize(1300, 820)
+        self.resize(1360, 860)
+        self.setMinimumSize(1000, 640)
         self.setAcceptDrops(True)
         self.project_path: Path | None = None
         self.modified = False
@@ -48,6 +71,8 @@ class MainWindow(QMainWindow):
         self.nest_worker: NestWorker | None = None
         self.import_worker: ImportWorker | None = None
         self._edited_while_running = False
+        self._stop_requested = False
+        self._exported = False
         self._drain = None
         self._sheet = 0
         self._sheet_t0 = 0.0
@@ -60,40 +85,68 @@ class MainWindow(QMainWindow):
         self.params_panel = ParamsPanel()
         self.result_panel = ResultPanel()
         self.result_panel.parts_fn = lambda: self.model.parts
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.parts_tab, "Piezas")
-        self.tabs.addTab(self.params_panel, "Parámetros")
-        self.tabs.addTab(self.result_panel, "Resultado")
-        self.setCentralWidget(self.tabs)
 
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(2000)
-        dock = QDockWidget("Mensajes", self)
+        self.dock = dock = QDockWidget("Mensajes", self)
         dock.setObjectName("mensajes")
         dock.setWidget(self.log_view)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable
                          | QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
-        self.resizeDocks([dock], [120], Qt.Orientation.Vertical)
+        self.resizeDocks([dock], [140], Qt.Orientation.Vertical)
+        dock.hide()      # se abre solo cuando hay avisos (o desde Ver › Mensajes)
 
         self.status = QLabel()
         self.progress = QProgressBar()
-        self.progress.setMaximumWidth(260)
+        self.progress.setTextVisible(False)
         self.progress.hide()
         self.statusBar().addWidget(self.status, 1)
-        self.statusBar().addPermanentWidget(self.progress)
 
         self._make_actions(dock)
+        self.export_panel = ExportPanel(self.a_labels, self.a_arcs)
+
+        # páginas, en el orden de los pasos (self.tabs: así lo usan también las pruebas)
+        self.tabs = QStackedWidget()
+        for page in (self.parts_tab, self.params_panel, self.result_panel, self.export_panel):
+            self.tabs.addWidget(page)
+        self.tabs.currentChanged.connect(self._page_changed)
+
+        central = QWidget()
+        h = QHBoxLayout(central)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+        h.addWidget(self._make_sidebar())
+        main = QVBoxLayout()
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+        main.addWidget(self._make_header())
+        main.addWidget(self.tabs, 1)
+        main.addWidget(self._make_footer())
+        h.addLayout(main, 1)
+        self.setCentralWidget(central)
+
+        log_btn = QToolButton()
+        log_btn.setDefaultAction(dock.toggleViewAction())
+        log_btn.setAutoRaise(True)
+        self.statusBar().addPermanentWidget(log_btn)
 
         # --- conexiones ---------------------------------------------------------
         self.model.edited.connect(self._on_parts_edited)
+        self.model.modelReset.connect(self._refresh_steps)     # set_parts (abrir, nuevo) no emite edited
         self.model.message.connect(self._warn)
         self.parts_tab.import_requested.connect(self.import_files)
+        self.parts_tab.import_manual_requested.connect(self.import_manual)
         self.parts_tab.hint.connect(self.status.setText)
         self.parts_tab.message.connect(self.log)
         self.params_panel.changed.connect(self._on_params_changed)
-        self.result_panel.edited.connect(self._set_modified)
+        self.result_panel.edited.connect(self._on_result_edited)
+        self.result_panel.calculate_requested.connect(self.start_nest)
+        self.export_panel.export_dxf_requested.connect(self.export_dxf)
+        self.export_panel.export_pdf_requested.connect(self.export_pdf)
+        self.export_panel.save_requested.connect(self.save_project)
+        self.export_panel.save_as_requested.connect(self.save_project_as)
 
         self.timer = QTimer(self)
         self.timer.setInterval(300)
@@ -101,7 +154,165 @@ class MainWindow(QMainWindow):
 
         self._update_title()
         self._update_actions()
-        self.log("Listo. Importa piezas (Ctrl+I), revisa la pestaña Parámetros y pulsa Calcular (F5).")
+        self._page_changed(0)
+        self.log("Listo. Importa piezas (Ctrl+I), revisa el material y pulsa Calcular (F5).")
+
+    # --- barra lateral, cabecera y pie ---------------------------------------------
+    def _make_sidebar(self) -> QWidget:
+        side = QWidget()
+        side.setObjectName("sidebar")
+        side.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        side.setFixedWidth(268)
+        v = QVBoxLayout(side)
+        v.setContentsMargins(10, 18, 10, 16)
+        v.setSpacing(4)
+        v.addWidget(style.label(APP_NAME, "appName"))
+        self.project_label = style.label("", "projectName")
+        v.addWidget(self.project_label)
+        v.addSpacing(10)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        for text, slot, tip in [("Nuevo", self.new_project, "Proyecto nuevo (Ctrl+N)"),
+                                ("Abrir", self.open_project_dialog, "Abrir proyecto (Ctrl+O)"),
+                                ("Guardar", self.save_project, "Guardar proyecto (Ctrl+S)")]:
+            row.addWidget(style.button(text, "side", slot, tip))
+        v.addLayout(row)
+        v.addSpacing(18)
+        v.addWidget(style.label("PASOS", "sideSection"))
+        v.addSpacing(4)
+        self.steps: list[StepButton] = []
+        group = QButtonGroup(side)
+        group.setExclusive(True)
+        for i, title in enumerate(STEP_TITLES):
+            b = StepButton(i + 1, title)
+            b.clicked.connect(lambda _=False, i=i: self.tabs.setCurrentIndex(i))
+            group.addButton(b)
+            self.steps.append(b)
+            v.addWidget(b)
+        v.addStretch(1)
+        self.b_calc = style.button("Calcular nesting", "primary", self._calc_clicked,
+                                   "Calcular la colocación de las piezas (F5)")
+        self.b_calc.setMinimumHeight(38)
+        v.addWidget(self.b_calc)
+        v.addSpacing(6)
+        v.addWidget(self.progress)
+        self.run_label = style.label("", wrap=True)
+        self.run_label.setStyleSheet(f"color: {style.SIDEBAR_MUTED}; font-size: 8.5pt;")
+        v.addWidget(self.run_label)
+        return side
+
+    def _make_header(self) -> QWidget:
+        head = QWidget()
+        head.setObjectName("header")
+        head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        v = QVBoxLayout(head)
+        v.setContentsMargins(20, 14, 20, 12)
+        v.setSpacing(2)
+        self.page_title = style.label("", "pageTitle")
+        self.page_subtitle = style.label("", "pageSubtitle", wrap=True)
+        v.addWidget(self.page_title)
+        v.addWidget(self.page_subtitle)
+        return head
+
+    def _make_footer(self) -> QWidget:
+        foot = QWidget()
+        foot.setObjectName("footer")
+        foot.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        h = QHBoxLayout(foot)
+        h.setContentsMargins(20, 10, 20, 10)
+        self.b_back = style.button("← Anterior", "", lambda: self.tabs.setCurrentIndex(self.tabs.currentIndex() - 1))
+        self.footer_hint = style.label("", "muted")
+        self.b_forward = style.button("", "primary", self._forward)
+        h.addWidget(self.b_back)
+        h.addSpacing(12)
+        h.addWidget(self.footer_hint, 1)
+        h.addWidget(self.b_forward)
+        return foot
+
+    def _page_changed(self, i: int):
+        i = max(0, i)
+        for k, b in enumerate(self.steps):
+            b.setChecked(k == i)
+        title, subtitle = STEP_TEXTS[i]
+        self.page_title.setText(f"{i + 1}. {title}")
+        self.page_subtitle.setText(subtitle)
+        self._update_footer()
+
+    def _update_footer(self):
+        i = self.tabs.currentIndex()
+        self.b_back.setVisible(i > 0)
+        running = self.nest_worker is not None
+        has_parts = any(p.quantity > 0 for p in self.model.parts)
+        if i == 0:
+            self.b_forward.setText("Siguiente: material y parámetros  →")
+            self.footer_hint.setText("" if has_parts else "Importa al menos una pieza y ponle cantidad.")
+        elif i == 1:
+            self.b_forward.setText("Calcular nesting  (F5)")
+            self.footer_hint.setText("Calculando…" if running else
+                                     f"Hasta {self.params_panel.time_limit.value()} s por plancha.")
+        elif i == 2:
+            self.b_forward.setText("Siguiente: exportar  →")
+            self.footer_hint.setText("Arrastra piezas para moverlas; los cambios se pueden deshacer (Ctrl+Z)."
+                                     if self.layout_ is not None else "")
+        else:
+            self.footer_hint.setText("")
+        self.b_forward.setVisible(i < 3)
+        self.b_forward.setEnabled(not (i == 1 and running))
+
+    def _forward(self):
+        i = self.tabs.currentIndex()
+        if i == 1:
+            self.start_nest()
+        elif i < 3:
+            self.tabs.setCurrentIndex(i + 1)
+
+    def _calc_clicked(self):
+        if self.nest_worker is None:
+            self.start_nest()
+        else:
+            self.stop_nest()
+
+    def _refresh_steps(self):
+        """Estado de cada paso en la barra lateral y comprobaciones de la página Exportar."""
+        parts = self.model.parts
+        copies = sum(p.quantity for p in parts)
+        s1, s2, s3, s4 = self.steps
+        if not parts:
+            s1.set_status("Importa los planos", "todo")
+        elif copies == 0:
+            s1.set_status(f"{len(parts)} piezas · todas con cantidad 0", "warn")
+        else:
+            s1.set_status(f"{len(parts)} pieza{'s' if len(parts) != 1 else ''} · "
+                          f"{copies} copia{'s' if copies != 1 else ''}", "done")
+        p = self.params_panel.params()
+        s2.set_status(f"{_num(p.sheet_width)}×{_num(p.sheet_height)} · sep. {_num(p.separation)} · "
+                      f"margen {_num(p.margin)}", "done" if copies else "todo")
+        L = self.layout_
+        issues = len(self.result_panel.issues)
+        unplaced = sum(L.unplaced.values()) if L else 0
+        rot = len(self.result_panel.rot_warnings)
+        if self.nest_worker is not None:
+            s3.set_status("Calculando…", "todo")
+        elif L is None or L.sheets == 0:
+            s3.set_status("Sin calcular", "todo")
+        elif self.result_stale:
+            s3.set_status("Desactualizado: vuelve a calcular", "warn")
+        elif issues:
+            s3.set_status(f"{issues} problema(s) de validación", "bad")
+        elif unplaced:
+            s3.set_status(f"Faltan {unplaced} pieza(s)", "bad")
+        else:
+            n = L.sheets
+            s3.set_status(f"{len(L.placements)} piezas en {n} plancha{'s' if n != 1 else ''}",
+                          "warn" if rot else "done")
+        has_result = L is not None and L.sheets > 0
+        if self._exported and has_result:
+            s4.set_status("Exportado", "done")
+        else:
+            s4.set_status("DXF y PDF de taller" if has_result else "Primero calcula", "todo")
+        self.export_panel.update_checks(has_result, self.result_stale, issues, unplaced, rot,
+                                        str(self.project_path) if self.project_path else "")
+        self._update_footer()
 
     # --- acciones y menús -------------------------------------------------------
     def _act(self, text, slot, shortcut=None, tip=None) -> QAction:
@@ -163,15 +374,12 @@ class MainWindow(QMainWindow):
         m.addAction(self.a_stop)
         m = self.menuBar().addMenu("&Ver")
         m.addAction(dock.toggleViewAction())
+        m.addSeparator()
+        for i, title in enumerate(STEP_TITLES):
+            a = self._act(f"Paso {i + 1}: {title}", lambda _=False, i=i: self.tabs.setCurrentIndex(i), f"Ctrl+{i + 1}")
+            m.addAction(a)
         m = self.menuBar().addMenu("Ay&uda")
         m.addAction(self.a_about)
-
-        tb = self.addToolBar("Principal")
-        tb.setObjectName("principal")
-        tb.setMovable(False)
-        for a in (self.a_new, self.a_open, self.a_save, None, self.a_import, None,
-                  self.a_nest, self.a_stop, None, self.a_export, self.a_pdf):
-            tb.addSeparator() if a is None else tb.addAction(a)
 
     def _update_actions(self):
         running = self.nest_worker is not None
@@ -185,10 +393,22 @@ class MainWindow(QMainWindow):
         self.a_pdf.setEnabled(has_result)
         for a in (self.a_new, self.a_open):
             a.setEnabled(not running and not importing)
+        if running:
+            self.b_calc.setText("Deteniendo…" if self._stop_requested else "Detener")
+            self.b_calc.setToolTip("El motor no se puede interrumpir a mitad: para al acabar la plancha en curso")
+            style.set_kind(self.b_calc, "danger")
+        else:
+            self.b_calc.setText("Calcular nesting")
+            self.b_calc.setToolTip("Calcular la colocación de las piezas (F5)")
+            style.set_kind(self.b_calc, "primary")
+        self.b_calc.setEnabled(not (running and self._stop_requested))
+        self._refresh_steps()
 
     # --- estado ------------------------------------------------------------------
     def log(self, text: str):
         self.log_view.appendPlainText(f"{time.strftime('%H:%M:%S')}  {text}")
+        if text.startswith(("AVISO", "ERROR", "Traceback")):
+            self.dock.show()     # que no se pierda: el panel está oculto por defecto
 
     def _warn(self, text: str):
         self.log("AVISO: " + text)
@@ -197,10 +417,17 @@ class MainWindow(QMainWindow):
     def _update_title(self):
         name = self.project_path.name if self.project_path else "Proyecto sin guardar"
         self.setWindowTitle(f"{name}{' *' if self.modified else ''} — {APP_NAME}")
+        self.project_label.setText(f"{name}{' · sin guardar' if self.modified and self.project_path else ''}")
+        self.project_label.setToolTip(str(self.project_path) if self.project_path else "")
 
     def _set_modified(self, on: bool = True):
         self.modified = on
         self._update_title()
+        self._refresh_steps()
+
+    def _on_result_edited(self):
+        self._exported = False
+        self._set_modified()
 
     def _mark_stale(self):
         if self.nest_worker is not None:
@@ -208,6 +435,7 @@ class MainWindow(QMainWindow):
         if self.layout_ is not None and not self.result_stale:
             self.result_stale = True
             self.result_panel.set_stale(True)
+            self._refresh_steps()
 
     def _on_parts_edited(self):
         self._set_modified()
@@ -222,6 +450,7 @@ class MainWindow(QMainWindow):
     def _set_layout(self, layout: Layout | None, issues=None, stale=False, engine: Layout | None = None):
         self.layout_ = layout
         self.result_stale = stale
+        self._exported = False
         self.result_panel.set_layout(layout, issues, engine)
         self.result_panel.set_stale(stale)
         self._update_actions()
@@ -398,6 +627,7 @@ class MainWindow(QMainWindow):
         self.import_worker.failed.connect(self._import_failed)
         self.import_worker.finished.connect(self._import_finished)
         self.status.setText(f"Importando {len(files)} archivo(s)…")
+        self.run_label.setText(f"Importando {len(files)} archivo(s)…")
         self.progress.setRange(0, 0)
         self.progress.show()
         self._update_actions()
@@ -408,6 +638,7 @@ class MainWindow(QMainWindow):
         self.import_worker = None
         if self.nest_worker is None:
             self.progress.hide()
+            self.run_label.setText("")
         self.status.setText("")
         self._update_actions()
 
@@ -514,9 +745,8 @@ class MainWindow(QMainWindow):
         box.setText(f"{name} tiene {n} contornos cerrados.")
         box.setInformativeText(
             "Si es un plano con varias vistas, cotas o cajetín, muchos serán contornos falsos (marco, "
-            "letras…). La selección manual de contornos llegará más adelante; de momento puedes "
-            "importarlos con cantidad 0 y poner cantidad solo a los buenos, o elegir a mano qué "
-            "contornos forman cada pieza.")
+            "letras…). Lo más claro es elegir a mano qué contornos forman cada pieza. También puedes "
+            "importarlos todos con cantidad 0 y poner cantidad solo a los buenos.")
         b0 = box.addButton("Cantidad 0 (elegir después)", QMessageBox.ButtonRole.AcceptRole)
         b1 = box.addButton("Cantidad 1 a todos", QMessageBox.ButtonRole.AcceptRole)
         bm = box.addButton("Seleccionar contornos a mano…", QMessageBox.ButtonRole.AcceptRole)
@@ -546,6 +776,7 @@ class MainWindow(QMainWindow):
         total = sum(p.quantity for p in parts)
         self.log(f"Calculando {total} piezas, hasta {params.time_limit} s por plancha…")
         self._edited_while_running = False
+        self._stop_requested = False
         self._drain = None
         self._best = None
         self._phase = ""
@@ -557,6 +788,7 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 0)
         self.progress.show()
         self.status.setText("Preparando (pieza dentro de pieza)…" if params.part_in_part else "Preparando…")
+        self.run_label.setText(self.status.text())
         self._update_actions()
         self.nest_worker.start()
         self.timer.start()
@@ -564,6 +796,8 @@ class MainWindow(QMainWindow):
     def stop_nest(self):
         if self.nest_worker is not None:
             self.nest_worker.request_stop()
+            self._stop_requested = True
+            self._update_actions()
             self.a_stop.setEnabled(False)
             self.log("Se detendrá al acabar la plancha en curso (el motor no se puede interrumpir a mitad).")
 
@@ -588,6 +822,8 @@ class MainWindow(QMainWindow):
         best = f" · mejor largo {fmt(self._best)} mm" if self._best is not None else ""
         phase = f" · {self._phase}" if self._phase else ""
         self.status.setText(f"Calculando plancha {self._sheet + 1}{phase}{best} · {int(elapsed)} / {limit} s")
+        self.run_label.setText(f"Plancha {self._sheet + 1}{phase} · {int(elapsed)} / {limit} s"
+                               + (f"\nMejor largo: {fmt(self._best)} mm" if self._best is not None else ""))
 
     def _nest_done(self, layout: Layout, issues):
         stale = self._edited_while_running
@@ -617,9 +853,11 @@ class MainWindow(QMainWindow):
         self.nest_worker.deleteLater()
         self.nest_worker = None
         self._drain = None
+        self._stop_requested = False
         if self.import_worker is None:
             self.progress.hide()
         self.status.setText("")
+        self.run_label.setText("")
         self._update_actions()
 
     # --- exportar ------------------------------------------------------------------
@@ -647,6 +885,9 @@ class MainWindow(QMainWindow):
         for f in files:
             self.log(f"Exportado {f}")
         self.status.setText(f"{len(files)} DXF exportados en {folder}")
+        self.export_panel.last.setText(f"Último DXF: {len(files)} archivo(s) en {folder}")
+        self._exported = True
+        self._refresh_steps()
 
     def _export_problems(self) -> bool:
         """Avisa si se va a exportar algo dudoso. True = seguir."""
@@ -690,6 +931,9 @@ class MainWindow(QMainWindow):
         self._remember_dir(path)
         self.log(f"PDF de taller: {path}")
         self.status.setText(f"PDF de taller guardado en {path}")
+        self.export_panel.last.setText(f"Último PDF de taller: {path}")
+        self._exported = True
+        self._refresh_steps()
 
     # --- otros -----------------------------------------------------------------------
     def about(self):

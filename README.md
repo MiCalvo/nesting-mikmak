@@ -41,9 +41,17 @@ Para construirlo tú: `packaging\construir_windows.bat` (deja el resultado en
 python -m nesting2d gui
 ```
 
-(o `nesting2d-gui`, que abre la ventana sin consola). Flujo:
+(o `nesting2d-gui`, que abre la ventana sin consola).
 
-1. **Importar PDF/DXF…** (Ctrl+I). Cada archivo da una o varias piezas. Un DXF
+La ventana sigue los pasos del trabajo. A la izquierda, **1 Piezas · 2 Material
+y parámetros · 3 Resultado · 4 Exportar**, cada uno con su estado (✓ hecho,
+! con avisos) y una línea que dice qué falta («Importa los planos», «Sin
+calcular», «Desactualizado: vuelve a calcular»…); debajo, el botón **Calcular
+nesting** (F5), siempre a mano, con el progreso. Se puede ir a cualquier paso
+(clic o Ctrl+1…4); abajo, «Anterior» y «Siguiente». El panel de mensajes está
+oculto y se abre solo cuando hay un aviso (o desde Ver › Mensajes).
+
+1. **Paso 1 · Piezas → «Importar planos…»** (Ctrl+I), o arrastra los archivos a la ventana. Cada archivo da una o varias piezas. Un DXF
    con varias capas pregunta cuáles importar. Si un archivo tiene muchos
    contornos (un plano con vistas, cotas y cajetín), la app pregunta si
    importarlos con cantidad 0 o **seleccionar los contornos a mano**
@@ -63,18 +71,23 @@ python -m nesting2d gui
    umbral de blanco y negro y la **escala**, que es obligatoria: sale sola de
    los ppp de un escaneo, o se mide en la imagen una distancia conocida
    («Medir en la imagen…»). La precisión depende de la resolución (≈ ±1 píxel).
-2. **Pestaña Piezas**: doble clic para cambiar nombre, escala, cantidad o
-   rotaciones; casilla de espejo. Para corregir la escala con una medida conocida,
-   selecciona la pieza y pulsa **Acotar: dos puntos** (engancha a centros de
-   círculo, vértices y aristas) o **Acotar: arista recta**, y escribe la medida
-   real; puedes aplicarla a todas las piezas del mismo archivo.
-3. **Pestaña Parámetros**: plancha, separación, margen, rotaciones, pieza dentro
-   de pieza, lado de compactación, tiempo y semilla.
-4. **Calcular** (F5). Se calcula en segundo plano; la barra de estado muestra la
-   plancha, la fase y el mejor largo encontrado. **Detener** para al acabar la
-   plancha en curso (el motor no se puede cortar a mitad).
-5. **Pestaña Resultado**: cada plancha con el retal libre, métricas y validación
-   (en rojo las piezas que incumplan separación o margen). Edición manual:
+2. **Paso 1 · Piezas**: al elegir una pieza se ve ampliada y, en **Propiedades
+   de la pieza**, su nombre, medidas, origen, escala, cantidad, rotaciones y
+   espejo (también se cambian con doble clic en la tabla). Para corregir la
+   escala con una medida conocida, pulsa **Acotar: Dos puntos** (engancha a
+   centros de círculo, vértices y aristas) o **Arista recta**, y escribe la
+   medida real; puedes aplicarla a todas las piezas del mismo archivo. Con
+   varias filas elegidas, «Cantidad · Aplicar a la selección».
+3. **Paso 2 · Material y parámetros**: plancha, separación, margen, rotaciones,
+   pieza dentro de pieza, lado de compactación, tiempo y semilla.
+4. **Calcular nesting** (F5, en la barra lateral). Se calcula en segundo plano;
+   debajo del botón se ven la plancha, la fase y el mejor largo encontrado. El
+   botón pasa a **Detener**, que para al acabar la plancha en curso (el motor no
+   se puede cortar a mitad).
+5. **Paso 3 · Resultado**: arriba, los indicadores (planchas, piezas colocadas,
+   aprovechamiento y retal libre de la plancha que se ve) y la validación (✓ o
+   el nº de problemas, que salen en la tarjeta «Problemas»; en rojo las piezas
+   que incumplan separación o margen). Edición manual:
    - clic selecciona, Ctrl+clic añade o quita; arrastrar en vacío hace una
      ventana (de izquierda a derecha, piezas enteras dentro; de derecha a
      izquierda, piezas que toca);
@@ -85,15 +98,19 @@ python -m nesting2d gui
    - Ctrl+Z / Ctrl+Y deshacen y rehacen; «Volver al resultado del motor».
    - «A la plancha»: pasa la selección a otra plancha o a una nueva;
      «Eliminar planchas vacías».
-6. **Exportar DXF…** (Ctrl+E): `plancha_1.dxf`, `plancha_2.dxf`… en la carpeta
-   que elijas. Archivo → «DXF con arcos y círculos» los escribe con arcos reales
-   (desviación ≤ 0,05 mm) en vez de segmentos; por defecto, segmentos. **Exportar PDF de taller…** (Ctrl+P): resumen con la tabla de
-   piezas y una página por plancha a escala, con cada pieza numerada.
+6. **Paso 4 · Exportar**: primero, las comprobaciones «Antes de cortar»
+   (resultado al día, sin problemas de validación, todas las piezas colocadas,
+   giros permitidos). **Exportar DXF…** (Ctrl+E): `plancha_1.dxf`,
+   `plancha_2.dxf`… en la carpeta que elijas; la casilla «Arcos y círculos» (la
+   misma que Archivo → «DXF con arcos y círculos») los escribe con arcos reales
+   (desviación ≤ 0,05 mm) en vez de segmentos; por defecto, segmentos.
+   **Exportar PDF de taller…** (Ctrl+P): resumen con la tabla de piezas y una
+   página por plancha a escala, con cada pieza numerada.
    **Guardar** (Ctrl+S) crea el proyecto `.json` (con el resultado del motor y
    tus ediciones). Archivo → Abrir reciente; también puedes arrastrar PDF, DXF o
    proyectos a la ventana.
 
-**Perfiles de material** (pestaña Parámetros): plantillas con plancha,
+**Perfiles de material** (paso 2): plantillas con plancha,
 separación, margen, material y espesor. «Guardar como perfil…» guarda los
 valores actuales; al crear un proyecto nuevo se elige perfil.
 

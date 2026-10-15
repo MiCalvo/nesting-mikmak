@@ -19,6 +19,7 @@ cambiar comportamiento o alcance.
 Fases 1 a 5 HECHAS y probadas por Mikel en Windows ("parece que funciona bien").
 Fase 6 (imágenes: capturas y escaneos con OpenCV) HECHA, sin probar aún por Mikel.
 Fase 7 (selección por aristas, círculos/arcos, taladros, DXF con arcos) HECHA, sin probar aún por Mikel.
+Fase 8 (rediseño de la interfaz: pasos en barra lateral, aspecto profesional) HECHA, sin probar aún por Mikel.
 `python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
 no está PySide6). Pendiente: DXF reales de su CAD.
 
@@ -51,15 +52,21 @@ nesting2d/
                          avisos de giro no permitido (devuelve cambios; la GUI los deshace)
   cli.py                 línea de comandos: `gui`, `autoprueba`, `piezas` y `nest`
   selftest.py            autoprueba sin archivos externos (motor, DXF, PDF, Qt)
-  gui/app.py             arranque (QApplication + gc_guard + MainWindow)
-  gui/main_window.py     ventana: menús, importar/calcular en hilos, guardar/abrir, exportar DXF
+  gui/app.py             arranque (QApplication + gc_guard + style + MainWindow)
+  gui/style.py           aspecto: Fusion + paleta clara + QSS; Card, Kpi, Badge, button(kind=…)
+  gui/steps.py           StepButton: paso de la barra lateral (número/✓/!, título, estado)
+  gui/main_window.py     ventana: barra lateral de pasos + cabecera + páginas (QStackedWidget
+                         `tabs`) + pie Anterior/Siguiente; menús, importar/calcular en hilos,
+                         guardar/abrir, exportar; `_refresh_steps` pone el estado de cada paso
+  gui/export_panel.py    paso 4: comprobaciones «Antes de cortar» y botones DXF/PDF/guardar
   gui/parts_model.py     tabla de piezas (modelo + editores de escala/cantidad/rotaciones)
-  gui/parts_tab.py       pestaña Piezas + diálogo de escala por cota
+  gui/parts_tab.py       paso 1: tabla (estado vacío), vista previa, tarjeta de propiedades
+                         (edita por `model.setData`) + diálogo de escala por cota
   gui/part_view.py       vista ampliada de una pieza y herramienta de acotar
   gui/snapping.py        enganche a centros/vértices/aristas (sin Qt, probado aparte)
-  gui/params_panel.py    pestaña Parámetros, perfiles (perfiles.json en AppData) y ajustes
+  gui/params_panel.py    paso 2: parámetros, perfiles (perfiles.json en AppData) y ajustes
                          de importación (QSettings)
-  gui/result_view.py     pestaña Resultado y editor: selección (clic/ventana CAD), arrastre
+  gui/result_view.py     paso 3 y editor: indicadores, insignia de validación, tarjetas; selección (clic/ventana CAD), arrastre
                          con enganche, flechas, panel X/Y/ángulo, QUndoStack, validación en vivo
   gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
   gui/gc_guard.py        recolección de basura solo en el hilo principal (ver abajo)
@@ -107,6 +114,11 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   de pasar todas las pruebas. Comprobar siempre el código de salida de pytest, no
   solo "N passed".
 - Interfaz: Y hacia arriba en los datos; las escenas de Qt dibujan en (x, −y).
+- Aspecto (`gui/style.py`): estilo Fusion + paleta + QSS. NO estilar con QSS los
+  campos numéricos ni las listas desplegables: con borde por QSS, Qt deja de
+  dibujar sus flechas con el estilo base. La QApplication de las pruebas llama
+  también a `style.apply` (como la app real). `self.tabs` es un QStackedWidget
+  con las 4 páginas en el orden de los pasos (las pruebas usan `setCurrentWidget`).
 - `Layout.stats()["free"]` = retal desde un margen más allá de la última pieza
   hasta el borde de la plancha, a todo su ancho. `nester.free_rect` da esa misma
   zona como rectángulo (la usan la vista y el PDF; hay prueba que lo vigila).
@@ -201,6 +213,11 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
 7. ~~Aristas~~ (hecha, 15/10/2026, a petición de Mikel): selección por aristas y
    reconocimiento de círculos/arcos; DXF con arcos como opción. Mikel NO eligió el
    filtro por grosor/tipo de línea (comprobado viable; posible mejora).
+8. ~~Rediseño de la interfaz~~ (hecho, 15/10/2026, a petición de Mikel: «fea y poco
+   clara»): barra lateral con los pasos y su estado, «Calcular nesting» siempre
+   visible, tarjeta de propiedades, indicadores y validación en el resultado,
+   página Exportar con comprobaciones; mensajes ocultos salvo avisos. Sin tocar la
+   lógica de nesting.
 
 ## Pendientes abiertos
 - Separación y margen reales: los dirá el proveedor de la mica.

@@ -1,4 +1,4 @@
-"""Pestaña Parámetros: parámetros del proyecto y ajustes generales de importación.
+"""Paso 2 · Material y parámetros: parámetros del proyecto y ajustes generales de importación.
 
 Los parámetros del proyecto se guardan en el .json del proyecto. Los ajustes
 generales (tolerancia de unión, área mínima) son de la aplicación y se guardan
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout
 from ..engine.params import SIDES, NestParams
 from ..importers.contours import ImportOptions
 from ..profiles import Profile, load_profiles, save_profiles
+from . import style
 
 
 def profiles_path() -> Path:
@@ -69,7 +70,7 @@ class ParamsPanel(QWidget):
         f.addRow("Margen al borde:", self.margin)
         note = QLabel("Separación y margen de 5 mm: provisionales hasta que los confirme el proveedor.")
         note.setWordWrap(True)
-        note.setStyleSheet("color: #8a6d00;")
+        note.setStyleSheet(f"color: {style.WARN};")
         f.addRow(note)
 
         # --- nesting -------------------------------------------------------------
@@ -98,7 +99,7 @@ class ParamsPanel(QWidget):
         f.addRow("Semilla (avanzado):", seed_row)
         hint = QLabel("Con la semilla fijada, el mismo proyecto da siempre el mismo resultado.")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: gray;")
+        hint.setObjectName("muted")
         f.addRow(hint)
 
         # --- perfiles de material --------------------------------------------------
@@ -137,11 +138,15 @@ class ParamsPanel(QWidget):
         f.addRow("Tolerancia de unión de trazos:", self.tolerance)
         f.addRow("Área mínima de contorno:", self.min_area)
         imp_hint = QLabel("Se aplican a las importaciones siguientes; no cambian piezas ya importadas.")
-        imp_hint.setStyleSheet("color: gray;")
+        imp_hint.setWordWrap(True)
+        imp_hint.setObjectName("muted")
         f.addRow(imp_hint)
 
         cols = QHBoxLayout()
+        cols.setSpacing(16)
         left, right = QVBoxLayout(), QVBoxLayout()
+        left.setSpacing(12)
+        right.setSpacing(12)
         left.addWidget(prof)
         left.addWidget(sheet)
         left.addWidget(mat)
@@ -151,8 +156,13 @@ class ParamsPanel(QWidget):
         right.addStretch(1)
         cols.addLayout(left, 1)
         cols.addLayout(right, 1)
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(16, 6, 16, 14)
+        cl.addLayout(cols)
         outer = QVBoxLayout(self)
-        outer.addLayout(cols)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(style.page_scroll(content))
 
         self.set_params(NestParams())
         self._load_settings()

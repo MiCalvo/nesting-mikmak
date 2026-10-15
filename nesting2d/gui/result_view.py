@@ -1,4 +1,4 @@
-"""Pestaña Resultado: dibujo de cada plancha, métricas, validación y edición manual.
+"""Paso 3 · Resultado: dibujo de cada plancha, indicadores, validación y edición manual.
 
 Edición manual (fase 3, ver especificación «Edición manual»):
 - Seleccionar: clic; Ctrl+clic añade o quita; arrastrar en vacío hace una
@@ -17,10 +17,10 @@ from dataclasses import replace
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QTransform, QUndoCommand, QUndoStack
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame,
                                QGraphicsItem, QGraphicsScene, QGraphicsSimpleTextItem,
-                               QGraphicsView, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-                               QListWidget, QListWidgetItem, QPushButton, QRadioButton, QSplitter,
+                               QGraphicsView, QHBoxLayout, QHeaderView, QLabel,
+                               QListWidget, QListWidgetItem, QRadioButton, QSplitter, QStackedWidget,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 from shapely.affinity import translate
 from shapely.geometry import Polygon, box
@@ -29,10 +29,11 @@ from shapely.ops import polylabel
 from .. import editing
 from ..engine.nester import Layout, free_rect  # noqa: F401  (free_rect: la usan las pruebas)
 from ..validate import Issue, check, check_layout
+from . import style
 from .qt_util import fmt, part_color, polygon_path
 
-SHEET_FILL = QColor("#f4f1ea")
-FREE_FILL = QColor(60, 170, 90, 45)
+SHEET_FILL = style.SHEET
+FREE_FILL = QColor(46, 160, 67, 34)
 SNAP_PX = 8
 
 
@@ -70,9 +71,9 @@ def _pen(color, width=0.0, style=Qt.PenStyle.SolidLine) -> QPen:
     return pen
 
 
-PEN_NORMAL = _pen("#202020", 0.8)
-PEN_BAD = _pen("#d00000", 2.5)
-PEN_SELECTED = _pen("#0050d0", 2.5)
+PEN_NORMAL = _pen("#3b4452", 0.8)
+PEN_BAD = _pen(style.BAD, 2.5)
+PEN_SELECTED = _pen(style.ACCENT, 2.5)
 
 
 class SheetView(QGraphicsView):
@@ -94,7 +95,8 @@ class SheetView(QGraphicsView):
         self.setScene(QGraphicsScene(self))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setBackgroundBrush(QColor("#d9d9d9"))
+        self.setBackgroundBrush(style.CANVAS)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.labels: list[tuple[QGraphicsSimpleTextItem, Polygon, tuple[float, float]]] = []
         self.piece_items: dict[int, object] = {}    # índice de Placement -> QGraphicsPathItem
@@ -257,9 +259,9 @@ class SheetView(QGraphicsView):
             return
         (x0, y0), (x1, y1) = self._press, self._band_end
         window = x1 >= x0
-        painter.setPen(_pen("#0050d0" if window else "#208020", 1,
+        painter.setPen(_pen(style.ACCENT if window else style.OK, 1,
                             Qt.PenStyle.SolidLine if window else Qt.PenStyle.DashLine))
-        painter.setBrush(QColor(0, 80, 208, 30) if window else QColor(32, 128, 32, 30))
+        painter.setBrush(QColor(31, 111, 235, 28) if window else QColor(26, 127, 55, 28))
         painter.drawRect(QRectF(QPointF(min(x0, x1), -max(y0, y1)), QPointF(max(x0, x1), -min(y0, y1))))
 
     # --- teclado -------------------------------------------------------------------
@@ -301,7 +303,8 @@ class EditCommand(QUndoCommand):
 
 
 class ResultPanel(QWidget):
-    edited = Signal()   # el resultado ha cambiado por edición manual (o deshacer/rehacer)
+    edited = Signal()                 # el resultado ha cambiado por edición manual (o deshacer/rehacer)
+    calculate_requested = Signal()    # botón «Calcular» del estado vacío
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -314,14 +317,18 @@ class ResultPanel(QWidget):
         self._labels_cache: dict[int, tuple[Polygon, tuple[float, float]]] = {}
         self.undo = QUndoStack(self)
 
-        self.stale = QLabel("El resultado no corresponde a los datos actuales: has cambiado piezas o "
-                            "parámetros después de calcular. Vuelve a calcular (F5).")
-        self.stale.setWordWrap(True)
-        self.stale.setStyleSheet("background: #fff3c4; color: #5c4400; padding: 6px; border: 1px solid #e0c060;")
+        self.stale = style.label("El resultado no corresponde a los datos actuales: has cambiado piezas o "
+                                 "parámetros después de calcular. Vuelve a calcular (F5).", "banner", wrap=True)
         self.stale.hide()
 
+        # --- barra de la vista ---------------------------------------------------
         self.sheet_combo = QComboBox()
+        self.sheet_combo.setMinimumContentsLength(18)
         self.sheet_combo.currentIndexChanged.connect(self._sheet_changed)
+        self.b_prev = style.button("◀", "", lambda: self.show_sheet(self.current_sheet() - 1), "Plancha anterior")
+        self.b_next = style.button("▶", "", lambda: self.show_sheet(self.current_sheet() + 1), "Plancha siguiente")
+        for b in (self.b_prev, self.b_next):
+            b.setFixedWidth(34)
         self.labels = QCheckBox("Nombres")
         self.labels.setChecked(True)
         self.labels.toggled.connect(self._draw)
@@ -332,50 +339,128 @@ class ResultPanel(QWidget):
         self.snap.setChecked(True)
         self.snap.setToolTip("Al arrastrar, engancha el rectángulo de la selección a los márgenes de la "
                              "plancha y a la separación mínima de las piezas vecinas.")
-        fit = QPushButton("Ajustar a la ventana")
         self.view = SheetView()
-        fit.clicked.connect(self.view.fit)
+        fit = style.button("Ajustar", "", self.view.fit, "Ver la plancha entera")
         bar = QHBoxLayout()
-        bar.addWidget(QLabel("Plancha:"))
+        bar.setSpacing(6)
+        bar.addWidget(QLabel("Plancha"))
+        bar.addWidget(self.b_prev)
         bar.addWidget(self.sheet_combo)
-        bar.addSpacing(12)
+        bar.addWidget(self.b_next)
+        bar.addSpacing(16)
         bar.addWidget(self.labels)
         bar.addWidget(self.show_free)
         bar.addWidget(self.snap)
         bar.addStretch(1)
         bar.addWidget(fit)
 
+        # --- indicadores ---------------------------------------------------------------
+        self.k_sheets = style.Kpi("Planchas")
+        self.k_parts = style.Kpi("Piezas colocadas")
+        self.k_util = style.Kpi("Aprovechamiento")
+        self.k_free = style.Kpi("Retal libre (mm)")
+        self.badge = style.Badge()
+        kpis = QHBoxLayout()
+        kpis.setSpacing(10)
+        for k in (self.k_sheets, self.k_parts, self.k_util, self.k_free):
+            kpis.addWidget(k, 1)
+        badge_box = QVBoxLayout()
+        badge_box.addStretch(1)
+        badge_box.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignRight)
+        badge_box.addStretch(1)
+        kpis.addLayout(badge_box)
+
+        # --- lienzo (o estado vacío) -------------------------------------------------------
+        canvas = QFrame()
+        canvas.setObjectName("card")
+        cl = QVBoxLayout(canvas)
+        cl.setContentsMargins(1, 1, 1, 1)
+        cl.addWidget(self.view)
+        empty = QFrame()
+        empty.setObjectName("dropZone")
+        el = QVBoxLayout(empty)
+        el.addStretch(1)
+        for text, name in [("Todavía no hay resultado", "emptyTitle"),
+                           ("Importa las piezas (paso 1), revisa el material (paso 2) y pulsa «Calcular nesting».",
+                            "muted")]:
+            lab = style.label(text, name, wrap=True)
+            lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            el.addWidget(lab)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(style.button("Calcular nesting (F5)", "primary", self.calculate_requested.emit))
+        row.addStretch(1)
+        el.addSpacing(10)
+        el.addLayout(row)
+        el.addStretch(2)
+        self.canvas_stack = QStackedWidget()
+        self.canvas_stack.addWidget(empty)
+        self.canvas_stack.addWidget(canvas)
+
+        # --- panel lateral --------------------------------------------------------------------
         side = QWidget()
         sl = QVBoxLayout(side)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.addWidget(self._make_edit_box())
-        self.summary = QLabel("Todavía no hay resultado. Importa piezas y pulsa «Calcular» (F5).")
-        self.summary.setWordWrap(True)
-        self.summary.setTextFormat(Qt.TextFormat.RichText)
-        sl.addWidget(self.summary)
+        sl.setContentsMargins(0, 0, 4, 0)
+        sl.setSpacing(10)
         self.problems = QListWidget()
         self.problems.setToolTip("Clic en un problema para seleccionar las piezas implicadas.")
         self.problems.itemClicked.connect(self._problem_clicked)
-        self.problems.setMaximumHeight(120)
-        sl.addWidget(self.problems)
+        self.problems.setMaximumHeight(140)
+        self.problems_card = style.Card("Problemas")
+        self.problems_card.body.addWidget(self.problems)
+        sl.addWidget(self.problems_card)          # arriba: es lo primero que hay que ver
+        sl.addWidget(self._make_edit_box())
+        self.summary = style.label("Todavía no hay resultado. Importa piezas y pulsa «Calcular» (F5).", wrap=True)
+        self.summary.setTextFormat(Qt.TextFormat.RichText)
         self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["Pieza", "En esta plancha"])
+        self.table.setHorizontalHeaderLabels(["Pieza", "Uds."])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        sl.addWidget(self.table, 1)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.table.setMinimumHeight(150)
+        self.count_card = style.Card("En esta plancha")
+        self.count_card.body.addWidget(self.table)
+        self.count_card.body.addWidget(self.summary)
+        sl.addWidget(self.count_card, 1)
+        help_card = style.Card("Atajos")
+        help_card.body.addWidget(style.label(
+            "Clic selecciona · Ctrl+clic añade · arrastrar en vacío: ventana (→ dentro, ← tocando) · "
+            "flechas mueven (Mayús ×10) · R / Mayús+R giran · botón central desplaza · rueda amplía.",
+            "muted", wrap=True))
+        sl.addWidget(help_card)
+        scroll = style.page_scroll(side)
+        scroll.setMinimumWidth(330)
 
-        split = QSplitter()
-        split.addWidget(self.view)
-        split.addWidget(side)
-        split.setStretchFactor(0, 1)
-        split.setStretchFactor(1, 0)
-        split.setSizes([1000, 340])
+        left = QWidget()
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(10)
+        self.top = QWidget()
+        tl = QVBoxLayout(self.top)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(10)
+        tl.addLayout(kpis)
+        tl.addLayout(bar)
+        ll.addWidget(self.top)
+        ll.addWidget(self.canvas_stack, 1)
+
+        self.split = QSplitter()
+        self.split.setChildrenCollapsible(False)
+        self.split.setHandleWidth(12)
+        self.split.addWidget(left)
+        self.split.addWidget(scroll)
+        self.split.setStretchFactor(0, 1)
+        self.split.setStretchFactor(1, 0)
+        self.split.setSizes([1000, 350])
 
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
         lay.addWidget(self.stale)
-        lay.addLayout(bar)
-        lay.addWidget(split, 1)
+        lay.addWidget(self.split, 1)
 
         self.view.drag_set_fn = self._drag_set
         self.view.snap_fn = self._snap
@@ -389,13 +474,23 @@ class ResultPanel(QWidget):
         self._live.setInterval(40)
         self._live.timeout.connect(self._live_validate)
         self._pending_drag = (0.0, 0.0)
+        self._show_empty()
         self._update_edit_box()
 
+    def _show_empty(self):
+        has = self.layout_ is not None and self.layout_.sheets > 0
+        self.canvas_stack.setCurrentIndex(1 if has else 0)
+        self.top.setVisible(has)
+        self.split.widget(1).setVisible(has)
+
     # --- panel de edición ----------------------------------------------------------
-    def _make_edit_box(self) -> QGroupBox:
-        g = QGroupBox("Edición manual")
-        self.sel_info = QLabel()
-        self.sel_info.setWordWrap(True)
+    def _make_edit_box(self) -> QWidget:
+        box_ = QWidget()
+        v = QVBoxLayout(box_)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(10)
+        g = style.Card("Selección")
+        self.sel_info = style.label("", "muted", wrap=True)
         self.ex = self._spin(-1e5, 1e5, 2, " mm")
         self.ey = self._spin(-1e5, 1e5, 2, " mm")
         self.ea = self._spin(-3600, 3600, 3, " °")
@@ -406,68 +501,72 @@ class ResultPanel(QWidget):
         grp.addButton(self.mode_abs)
         grp.addButton(self.mode_rel)
         self.mode_abs.toggled.connect(lambda *_: self._update_edit_box())
-        self.apply_btn = QPushButton("Aplicar")
-        self.apply_btn.clicked.connect(self._apply_fields)
+        self.apply_btn = style.button("Aplicar", "primary", self._apply_fields)
         for w in (self.ex, self.ey, self.ea):
             w.lineEdit().returnPressed.connect(self._apply_fields)
-        self.rot_ccw = QPushButton("Girar +")
-        self.rot_cw = QPushButton("Girar −")
-        self.rot_ccw.clicked.connect(lambda: self._key_rotate(1))
-        self.rot_cw.clicked.connect(lambda: self._key_rotate(-1))
+        self.rot_ccw = style.button("Girar +", "", lambda: self._key_rotate(1))
+        self.rot_cw = style.button("Girar −", "", lambda: self._key_rotate(-1))
         self.step = self._spin(0.01, 1000, 2, " mm")
         self.step.setValue(1.0)
-        self.b_undo = QPushButton("Deshacer")
-        self.b_redo = QPushButton("Rehacer")
-        self.b_undo.clicked.connect(self.undo.undo)
-        self.b_redo.clicked.connect(self.undo.redo)
+        self.step.setToolTip("Lo que se mueve la selección con cada pulsación de flecha (×10 con Mayús)")
+        self.b_undo = style.button("Deshacer", "", self.undo.undo)
+        self.b_redo = style.button("Rehacer", "", self.undo.redo)
         self.undo.canUndoChanged.connect(self.b_undo.setEnabled)
         self.undo.canRedoChanged.connect(self.b_redo.setEnabled)
         self.b_undo.setEnabled(False)
         self.b_redo.setEnabled(False)
-        self.b_engine = QPushButton("Volver al resultado del motor")
-        self.b_engine.clicked.connect(self.revert_to_engine)
+        self.b_engine = style.button("Volver al resultado del motor", "flat", self.revert_to_engine,
+                                     "Deshace todas las ediciones manuales (se puede deshacer)")
         self.target_sheet = QComboBox()
-        self.b_to_sheet = QPushButton("Mover")
-        self.b_to_sheet.setToolTip("Pasa la selección (con las piezas que lleve dentro) a otra plancha, "
-                                   "en la misma posición.")
-        self.b_to_sheet.clicked.connect(self._move_to_sheet)
-        self.b_compact = QPushButton("Eliminar planchas vacías")
-        self.b_compact.clicked.connect(self.remove_empty_sheets)
+        self.b_to_sheet = style.button("Mover", "", self._move_to_sheet,
+                                       "Pasa la selección (con las piezas que lleve dentro) a otra plancha, "
+                                       "en la misma posición.")
+        self.b_compact = style.button("Eliminar planchas vacías", "flat", self.remove_empty_sheets)
 
         f = QFormLayout()
+        f.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         modes = QHBoxLayout()
         modes.addWidget(self.mode_abs)
         modes.addWidget(self.mode_rel)
-        f.addRow(modes)
-        f.addRow("X:", self.ex)
-        f.addRow("Y:", self.ey)
-        f.addRow("Ángulo:", self.ea)
+        modes.addStretch(1)
+        f.addRow("", modes)
+        f.addRow("X", self.ex)
+        f.addRow("Y", self.ey)
+        f.addRow("Ángulo", self.ea)
         rot = QHBoxLayout()
         rot.addWidget(self.rot_ccw)
         rot.addWidget(self.rot_cw)
+        rot.addStretch(1)
         rot.addWidget(self.apply_btn)
+        g.body.addWidget(self.sel_info)
+        g.body.addLayout(f)
+        g.body.addLayout(rot)
+        g.body.addWidget(style.label("X, Y: esquina inferior izquierda del rectángulo que envuelve la selección.",
+                                     "muted", wrap=True))
+        sf = QFormLayout()
+        sf.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        sf.addRow("Paso de flechas", self.step)
+        g.body.addLayout(sf)
+        v.addWidget(g)
+
+        sh = style.Card("Planchas")
+        mv = QHBoxLayout()
+        mv.addWidget(QLabel("Pasar a"))
+        mv.addWidget(self.target_sheet, 1)
+        mv.addWidget(self.b_to_sheet)
+        sh.body.addLayout(mv)
+        sh.body.addWidget(self.b_compact, 0, Qt.AlignmentFlag.AlignLeft)
+        v.addWidget(sh)
+
+        hist = style.Card("Historial")
         ur = QHBoxLayout()
         ur.addWidget(self.b_undo)
         ur.addWidget(self.b_redo)
-        f.addRow(rot)
-        f.addRow("Paso de flechas:", self.step)
-        mv = QHBoxLayout()
-        mv.addWidget(self.target_sheet, 1)
-        mv.addWidget(self.b_to_sheet)
-        f.addRow("A la plancha:", mv)
-        help_ = QLabel("X, Y: esquina inferior izquierda del rectángulo que envuelve la selección. "
-                       "Clic selecciona; Ctrl+clic añade; arrastrar en vacío: ventana (→ dentro, ← tocando); "
-                       "flechas mueven (Mayús ×10); R / Mayús+R giran; botón central desplaza la vista.")
-        help_.setWordWrap(True)
-        help_.setStyleSheet("color: gray;")
-        v = QVBoxLayout(g)
-        v.addWidget(self.sel_info)
-        v.addLayout(f)
-        v.addLayout(ur)
-        v.addWidget(self.b_engine)
-        v.addWidget(self.b_compact)
-        v.addWidget(help_)
-        return g
+        ur.addStretch(1)
+        hist.body.addLayout(ur)
+        hist.body.addWidget(self.b_engine, 0, Qt.AlignmentFlag.AlignLeft)
+        v.addWidget(hist)
+        return box_
 
     @staticmethod
     def _spin(lo, hi, dec, suffix) -> QDoubleSpinBox:
@@ -648,6 +747,7 @@ class ResultPanel(QWidget):
         else:
             self.issues = issues or []
             self._revalidate(rotation_only=True)
+        self._show_empty()
         self._draw()
         self.view.fit()
 
@@ -729,17 +829,19 @@ class ResultPanel(QWidget):
         s = self.current_sheet()
         p = L.params
         W, H, m = p.sheet_width, p.sheet_height, p.margin
-        sc.addRect(QRectF(0, -H, W, H), _pen("#000000", 1.5), QBrush(SHEET_FILL))
+        off = 0.006 * max(W, H)     # sombra suave bajo la plancha
+        sc.addRect(QRectF(off, -H + off, W, H), QPen(Qt.PenStyle.NoPen), QBrush(QColor(20, 30, 45, 40)))
+        sc.addRect(QRectF(0, -H, W, H), _pen(style.SHEET_EDGE, 1.2), QBrush(SHEET_FILL))
         if m > 0:
-            sc.addRect(QRectF(m, -(H - m), W - 2 * m, H - 2 * m), _pen("#909090", 1, Qt.PenStyle.DotLine))
+            sc.addRect(QRectF(m, -(H - m), W - 2 * m, H - 2 * m), _pen("#9aa4b2", 1, Qt.PenStyle.DashLine))
         if self.show_free.isChecked():
             fr = free_rect(L, s)
             if fr:
                 x0, y0, x1, y1 = fr
-                sc.addRect(QRectF(x0, -y1, x1 - x0, y1 - y0), _pen("#3a9a5a", 1, Qt.PenStyle.DashLine),
+                sc.addRect(QRectF(x0, -y1, x1 - x0, y1 - y0), _pen("#2ea043", 1, Qt.PenStyle.DashLine),
                            QBrush(FREE_FILL))
                 sc.addItem(_centered_text(f"Retal libre {fmt(x1 - x0, 0)} × {fmt(y1 - y0, 0)} mm",
-                                          (x0 + x1) / 2, -(y0 + y1) / 2, QColor("#2a6a3a")))
+                                          (x0 + x1) / 2, -(y0 + y1) / 2, QColor(style.OK), 9))
 
         self.view.bad = {i for iss in self.issues for i in iss.items if L.placements[i].sheet == s}
         for i, q in enumerate(L.placements):
@@ -756,7 +858,7 @@ class ResultPanel(QWidget):
             self.view.piece_items[i] = item
             if self.labels.isChecked():
                 shell, (x, y) = self._label_point(i, q.polygon)
-                t = _centered_text(q.part, x, -y, QColor("#000000"), 7.5)
+                t = _centered_text(q.part, x, -y, QColor("#1f2933"), 7.5)
                 sc.addItem(t)
                 self.view.labels.append((t, shell, (x, y)))
                 self.view.label_of[i] = t
@@ -772,52 +874,80 @@ class ResultPanel(QWidget):
         L = self.layout_
         self.table.setRowCount(0)
         self.problems.clear()
+        self.b_prev.setEnabled(L is not None and self.current_sheet() > 0)
+        self.b_next.setEnabled(L is not None and self.current_sheet() < L.sheets - 1)
         if L is None:
             self.summary.setText("Todavía no hay resultado. Importa piezas y pulsa «Calcular» (F5).")
+            self.problems_card.hide()
             return
+        placed = len(L.placements)
+        missing = sum(L.unplaced.values())
+        self.k_sheets.set(str(L.sheets))
+        self.k_parts.set(f"{placed} / {placed + missing}", style.BAD if missing else None)
         lines = []
-        total = len(L.placements)
-        lines.append(f"<b>{total} piezas en {L.sheets} plancha{'s' if L.sheets != 1 else ''}</b>")
         if L.sheets:
             s = self.current_sheet()
             st = L.stats(s)
             fw, fh = st["free"]
-            lines.append(f"Plancha {s + 1}: {len(L.on_sheet(s))} piezas · largo ocupado {fmt(st['used_length'])} mm<br>"
-                         f"Retal libre: {fmt(fw, 0)} × {fmt(fh, 0)} mm · aprovechamiento {fmt(100 * st['utilization'])} %")
+            self.k_util.set(f"{fmt(100 * st['utilization'])} %")
+            self.k_free.set(f"{fmt(fw, 0)} × {fmt(fh, 0)}")
+            for k in (self.k_util, self.k_free):
+                k.setToolTip(f"De la plancha {s + 1} (la que se está viendo)")
+            lines.append(f"{len(L.on_sheet(s))} piezas · largo ocupado {fmt(st['used_length'])} mm")
             counts = Counter(q.part for q in L.on_sheet(s))
             self.table.setRowCount(len(counts))
             for r, (name, n) in enumerate(sorted(counts.items())):
-                it = QTableWidgetItem(name)
-                it.setBackground(self._colors.get(name, QColor("white")))
+                it = QTableWidgetItem(f"  {name}")
+                it.setIcon(_swatch(self._colors.get(name, QColor("white"))))
                 self.table.setItem(r, 0, it)
                 num = QTableWidgetItem(str(n))
                 num.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(r, 1, num)
+            self.count_card.title.setText(f"En la plancha {s + 1}")
         if L.sheets > 1:
             per = []
             for t in range(L.sheets):
                 stt = L.stats(t)
                 per.append(f"Pl. {t + 1}: {len(L.on_sheet(t))} piezas · {fmt(100 * stt['utilization'])} %")
-            lines.append("<br>".join(per))
+            lines.append("<span style='color:%s'>%s</span>" % (style.MUTED, "<br>".join(per)))
         if L.unplaced:
             left = ", ".join(f"{n} × {k}" for k, n in sorted(L.unplaced.items()))
-            lines.append(f"<span style='color:#b00000'><b>Sin colocar:</b> {left}</span>")
-        if self.issues:
-            lines.append(f"<span style='color:#b00000'><b>Validación: {len(self.issues)} problemas</b> "
-                         "(borde rojo)</span>")
-        else:
-            lines.append("<span style='color:#2a6a3a'>Validación: sin solapes; separación y margen respetados.</span>")
-        if self.rot_warnings:
-            lines.append(f"<span style='color:#a06000'><b>{len(self.rot_warnings)} pieza(s) con giro no permitido</b></span>")
+            lines.append(f"<span style='color:{style.BAD}'><b>Sin colocar:</b> {left}</span>")
         self.summary.setText("<br>".join(lines))
+        if self.issues:
+            n = len(self.issues)
+            self.badge.set(f"✕  {n} problema{'s' if n != 1 else ''}", "bad")
+        elif self.rot_warnings:
+            n = len(self.rot_warnings)
+            self.badge.set(f"!  {n} giro{'s' if n != 1 else ''} no permitido{'s' if n != 1 else ''}", "warn")
+        else:
+            self.badge.set("✓  Validación correcta", "ok")
+        self.badge.setToolTip("Se comprueba en vivo: solapes, separación mínima entre piezas y margen al borde."
+                              + ("" if self.issues or self.rot_warnings else "\nTodo correcto."))
         for iss in self.issues:
             it = QListWidgetItem(issue_text(L, iss, L.params.separation))
-            it.setForeground(QColor("#b00000"))
+            it.setForeground(QColor(style.BAD))
             it.setData(Qt.ItemDataRole.UserRole, list(iss.items))
             self.problems.addItem(it)
         for i, text in self.rot_warnings:
             it = QListWidgetItem(text)
-            it.setForeground(QColor("#a06000"))
+            it.setForeground(QColor(style.WARN))
             it.setData(Qt.ItemDataRole.UserRole, [i])
             self.problems.addItem(it)
         self.problems.setVisible(self.problems.count() > 0)
+        self.problems_card.setVisible(self.problems.count() > 0)
+        self.problems_card.title.setText(f"Problemas ({self.problems.count()})")
+
+
+def _swatch(color: QColor):
+    """Cuadradito del color de la pieza (para la tabla de recuentos)."""
+    from PySide6.QtGui import QIcon, QPixmap
+    pm = QPixmap(14, 14)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(_pen("#3b4452", 1))
+    p.setBrush(color)
+    p.drawRoundedRect(QRectF(1, 1, 12, 12), 3, 3)
+    p.end()
+    return QIcon(pm)

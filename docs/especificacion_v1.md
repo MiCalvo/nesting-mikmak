@@ -49,7 +49,7 @@ La v1 cubre el flujo completo, desde el PDF hasta el DXF de corte, con edición 
 1. **Crear el proyecto** y elegir un perfil de material, que trae la plancha, la separación y el margen.
 2. **Importar** uno o varios PDF o DXF. La app reconstruye las piezas y muestra sus medidas.
 3. **Seleccionar contornos a mano** solo en planos con varias vistas, cotas o cajetín.
-4. **Revisar la pestaña Piezas**: escala (1:1 por defecto; acotar si hace falta), cantidad, rotaciones y espejo.
+4. **Revisar las piezas** (paso 1): escala (1:1 por defecto; acotar si hace falta), cantidad, rotaciones y espejo.
 5. **Calcular el nesting.** Se ve la mejor solución encontrada dentro del tiempo configurado.
 6. **Ajustar a mano** las piezas que se quiera, con validación en vivo.
 7. **Exportar** el DXF de corte y el PDF de taller, y guardar el proyecto.
@@ -101,7 +101,7 @@ Acordado el 15/10/2026: capturas y escaneos sí; fotos con perspectiva, por ahor
 
 - No se lee directamente. La app avisa y sugiere convertir a DXF con ODA File Converter o LibreDWG.
 
-## Pestaña Piezas
+## Paso 1 · Piezas
 
 Cada elemento importado es una fila con escala 1:1 por defecto. La escala se corrige a mano o acotando una medida conocida.
 
@@ -248,3 +248,4 @@ Nesting en plancha 1200 × 1000 mm, margen 5 mm, 30 s:
 5. **Ampliaciones**: importador DXF con archivos reales, selección manual de contornos, ejecutable de Windows.
 6. **Imágenes** (añadida el 15/10/2026): capturas de pantalla y escaneos con OpenCV.
 7. **Aristas** (añadida el 15/10/2026): selección por aristas, reconocimiento de círculos y arcos, taladros por diámetro y DXF con arcos como opción.
+8. **Rediseño de la interfaz** (añadido el 15/10/2026, a petición de Mikel: «más limpia, con el paso a paso»): la ventana sigue el flujo de trabajo con una barra lateral de pasos (1 Piezas · 2 Material y parámetros · 3 Resultado · 4 Exportar) con su estado, botón «Calcular nesting» siempre visible, tarjeta de propiedades de la pieza, indicadores y validación en el resultado, y una página Exportar con las comprobaciones antes de cortar. No cambia la lógica de importación, nesting ni exportación.

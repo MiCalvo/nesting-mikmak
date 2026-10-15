@@ -11,12 +11,13 @@ import sys
 def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
-    from . import gc_guard
+    from . import gc_guard, style
     from .main_window import MainWindow
 
     argv = list(sys.argv if argv is None else argv)
     app = QApplication.instance() or QApplication(argv)
     gc_guard.install(app)
+    style.apply(app)
     app.setOrganizationName("nesting2d")
     app.setApplicationName("Nesting 2D")
     win = MainWindow()

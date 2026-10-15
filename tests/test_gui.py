@@ -27,6 +27,8 @@ def qapp():
     from nesting2d.gui import gc_guard
     app = QApplication.instance() or QApplication([])
     gc_guard.install(app)   # como en la app real: sin esto, el GC en otro hilo tumba Qt
+    from nesting2d.gui import style
+    style.apply(app)        # como en la app real (estilo y hoja de estilo)
     from PySide6.QtCore import QStandardPaths
     QStandardPaths.setTestModeEnabled(True)   # perfiles y ajustes en una carpeta de pruebas
     app.setOrganizationName("nesting2d-pruebas")
@@ -722,3 +724,56 @@ def test_edges_mode_shift_click_same_diameter_on_real_gasket(qapp):
     dlg._clicked(x, y, True, False)              # Mayús+clic en un taladro de Ø4,49
     assert len(dlg.sel_edges) == 15
     dlg.reject()
+
+
+# --- interfaz por pasos: barra lateral, propiedades de la pieza, página Exportar ----------
+def test_steps_status_and_export_checks(qapp, window):
+    w = window
+    s1, s2, s3, s4 = w.steps
+    assert w.parts_tab.stack.currentIndex() == 0            # estado vacío
+    assert (s1.state, s3.subtitle) == ("todo", "Sin calcular")
+    assert not w.export_panel.b_dxf.isEnabled()
+    w.model.set_parts([Part("a", box(0, 0, 40, 30)), Part("b", box(0, 0, 40, 30), quantity=0)])
+    assert w.parts_tab.stack.currentIndex() == 1
+    assert s1.state == "done" and "2 piezas · 1 copia" in s1.subtitle
+    w._set_layout(_boxes_layout(), None)
+    assert s3.state == "done" and w.export_panel.verdict.kind == "ok"
+    assert w.export_panel.b_dxf.isEnabled()
+    w.model.set_quantity([1], 2)                              # deja el resultado desactualizado
+    assert s3.state == "warn" and w.export_panel.c_result.state == "warn"
+    # pasos <-> páginas
+    w.steps[3].click()
+    assert w.tabs.currentWidget() is w.export_panel
+    w.tabs.setCurrentWidget(w.parts_tab)
+    assert w.steps[0].isChecked() and not w.steps[3].isChecked()
+    # las opciones del DXF de la página y del menú son las mismas
+    w.export_panel.arcs.setChecked(not w.a_arcs.isChecked())
+    assert w.export_panel.arcs.isChecked() == w.a_arcs.isChecked()
+    w.a_labels.setChecked(True)
+    assert w.export_panel.labels.isChecked()
+
+
+def test_part_properties_card_edits_model(qapp, window):
+    from nesting2d.gui.parts_model import ROTATION_CHOICES
+    w = window
+    t = w.parts_tab
+    w.model.set_parts([Part("a", box(0, 0, 40, 30)), Part("b", box(0, 0, 10, 10))])
+    t.select_row(0)
+    assert t.props.isEnabled() and t.p_name.text() == "a"
+    t.p_qty.setValue(7)
+    t.p_scale.setValue(0.5)
+    t.p_mirror.setChecked(True)
+    i = next(k for k, (text, _) in enumerate(ROTATION_CHOICES) if text == "Solo 0°")
+    t.p_rot.setCurrentIndex(i)
+    t.p_rot.activated.emit(i)
+    t.p_name.setText("b")                 # repetido: no se acepta
+    t.p_name.editingFinished.emit()
+    p = w.model.parts[0]
+    assert (p.quantity, p.scale, p.mirror, p.rotations, p.name) == (7, 0.5, True, [0.0], "a")
+    assert t.p_name.text() == "a"
+    t.p_name.setText("tapa")
+    t.p_name.editingFinished.emit()
+    assert p.name == "tapa" and w.modified and w.steps[0].state == "done"
+    # varias filas: propiedades desactivadas, cantidad para la selección
+    t.table.selectAll()
+    assert not t.props.isEnabled() and t.b_qty.isEnabled()

@@ -98,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--semilla", type=int, default=None)
     b.add_argument("--etiquetas", action="store_true", help="añade la capa ETIQUETAS al DXF")
     b.add_argument("--pdf-taller", action="store_true", help="genera también el PDF de taller (necesita PySide6)")
+    b.add_argument("--arcos", action="store_true", help="DXF con arcos y círculos en vez de segmentos")
     b.add_argument("--material", default="", help="informativo, sale en el PDF de taller")
     b.add_argument("--espesor", default="", help="informativo, sale en el PDF de taller")
     b.add_argument("--salida", default="salida")
@@ -153,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     issues = check_layout(layout)
     for s in range(layout.sheets):
         st = layout.stats(s)
-        dxf = export_sheet(layout, s, out / f"plancha_{s + 1}.dxf", labels=args.etiquetas)
+        dxf = export_sheet(layout, s, out / f"plancha_{s + 1}.dxf", labels=args.etiquetas, arcs=args.arcos)
         try:
             from .exporters.preview import sheet_png
             sheet_png(layout, s, out / f"plancha_{s + 1}.png")

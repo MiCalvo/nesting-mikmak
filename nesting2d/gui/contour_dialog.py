@@ -20,8 +20,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, QThread, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGraphicsScene,
                                QGraphicsView, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                                QMessageBox, QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget)
@@ -31,7 +32,8 @@ from shapely.ops import unary_union
 
 from ..geometry import Part
 from ..importers.contours import ImportOptions, closed_faces
-from .qt_util import polygon_path
+from ..importers.strokes import StrokeSet
+from .qt_util import fmt, polygon_path
 
 
 def _pen(color, width=0.0, style=Qt.PenStyle.SolidLine) -> QPen:
@@ -40,13 +42,20 @@ def _pen(color, width=0.0, style=Qt.PenStyle.SolidLine) -> QPen:
     return p
 
 
+EDGE_HELP = ("Lo AZUL es la pieza que forman las aristas elegidas (en azul fuerte).\n"
+             "Clic: elige o quita el contorno continuo (cadena) o el círculo bajo el cursor.\n"
+             "Ctrl+clic: una sola arista. Mayús+clic en un círculo: todos los del mismo Ø.\n"
+             "Arrastrar: añade aristas (→ enteras dentro; ← las que toca). Ctrl+arrastrar: quita.\n"
+             "«Taladros…»: añade los círculos de dentro del contorno, por diámetros.\n"
+             "Las cotas, ejes y referencias no cuentan si no las eliges. En rojo, extremos sin cerrar.\n"
+             "Al pasar el ratón: tipo de arista y Ø. Rueda: zoom; botón central: desplazar.")
 FILL_SELECTED = QColor(0, 90, 220, 110)
 FILL_USED = QColor(60, 160, 90, 90)
 
 
 class FacesWorker(QThread):
     """Lee el archivo y calcula las caras cerradas de cada página (o del DXF)."""
-    done = Signal(object, object)    # {página: [caras]}, [avisos]
+    done = Signal(object, object, object)    # {página: [caras]}, [avisos], {página: [trazos]}
     failed = Signal(str)
 
     def __init__(self, file: str, opts: ImportOptions, layers: list[str] | None = None, parent=None):
@@ -68,11 +77,12 @@ class FacesWorker(QThread):
         except Exception:
             self.failed.emit(traceback.format_exc())
             return
-        self.done.emit(faces, warnings)
+        self.done.emit(faces, warnings, pages)
 
 
 class FacesView(QGraphicsView):
-    clicked = Signal(float, float, bool)                  # punto en mm, ¿Mayús?
+    clicked = Signal(float, float, bool, bool)            # punto en mm, ¿Mayús?, ¿Ctrl?
+    hovered = Signal(float, float)                        # ratón encima (sin pulsar)
     band = Signal(float, float, float, float, bool, bool)  # x0, y0, x1, y1, ventana, quitar
     measured = Signal(float)                              # distancia entre dos clics (modo medir)
 
@@ -82,6 +92,7 @@ class FacesView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setBackgroundBrush(QColor("white"))
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setMouseTracking(True)
         self._press = None
         self._end = None
         self._pan = None
@@ -133,6 +144,8 @@ class FacesView(QGraphicsView):
         if self._press is not None:
             self._end = self._mm(e.position().toPoint())
             self.viewport().update()
+            return
+        self.hovered.emit(*self._mm(e.position().toPoint()))
 
     def mouseReleaseEvent(self, e):
         if self._pan is not None:
@@ -156,7 +169,9 @@ class FacesView(QGraphicsView):
         self.viewport().update()
         tol = 3 / (abs(self.transform().m11()) or 1)       # 3 píxeles
         if abs(x1 - x0) < tol and abs(y1 - y0) < tol:
-            self.clicked.emit(x0, y0, bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+            mods = e.modifiers()
+            self.clicked.emit(x0, y0, bool(mods & Qt.KeyboardModifier.ShiftModifier),
+                              bool(mods & Qt.KeyboardModifier.ControlModifier))
         else:
             remove = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
             self.band.emit(x0, y0, x1, y1, x1 >= x0, remove)
@@ -200,15 +215,35 @@ class ContourDialog(QDialog):
         self._items: dict[int, object] = {}
         self._tree = None
 
+        # modo "aristas": la pieza se define eligiendo aristas (cotas y ejes no cuentan)
+        self.edge_mode = False
+        self._polylines: dict[int, list] = {}
+        self._strokes: dict[int, StrokeSet] = {}
+        self.sel_edges: set[int] = set()
+        self.used_edges: dict[int, dict[int, str]] = {}
+        self._hover_text = ""
+        self.opts = opts
+
+        self.by_label = QLabel("Seleccionar por:")
+        self.by_combo = QComboBox()
+        self.by_combo.addItem("Zonas", False)
+        self.by_combo.addItem("Aristas", True)
+        self.by_combo.setToolTip("Zonas: regiones cerradas. Aristas: eliges líneas, arcos y círculos; las "
+                                 "cotas, ejes y referencias que crucen la pieza no la parten.")
+        self.by_combo.currentIndexChanged.connect(self._mode_changed)
         self.page_combo = QComboBox()
         self.page_combo.currentIndexChanged.connect(self._page_changed)
         self.info = QLabel("Leyendo el archivo…")
         self.view = FacesView()
         self.view.clicked.connect(self._clicked)
         self.view.band.connect(self._band)
+        self.view.hovered.connect(self._hovered)
         fit = QPushButton("Ajustar")
         fit.clicked.connect(self.view.fit)
         top = QHBoxLayout()
+        top.addWidget(self.by_label)
+        top.addWidget(self.by_combo)
+        top.addSpacing(10)
         top.addWidget(QLabel("Página:"))
         top.addWidget(self.page_combo)
         top.addWidget(self.info, 1)
@@ -218,12 +253,16 @@ class ContourDialog(QDialog):
         self.b_create.setDefault(True)
         self.b_create.clicked.connect(self.create_part)
         b_clear = QPushButton("Quitar selección")
-        b_clear.clicked.connect(lambda: self._set_selection(set()))
+        b_clear.clicked.connect(self._clear_selection)
+        self.b_holes = QPushButton("Taladros…")
+        self.b_holes.setToolTip("Añade los círculos que hay dentro del contorno elegido, por diámetros.")
+        self.b_holes.clicked.connect(self.add_holes)
+        self.b_holes.hide()
         self.list = QListWidget()
         self.list.itemChanged.connect(self._renamed)
         b_del = QPushButton("Deshacer pieza")
         b_del.clicked.connect(self._delete_part)
-        help_ = QLabel("Lo AZUL es la pieza.\n"
+        self.help = help_ = QLabel("Lo AZUL es la pieza.\n"
                        "Arrastrar: añade lo de dentro de la ventana, con sus huecos (→ enteros dentro; "
                        "← los que toca). Ctrl+arrastrar: quita.\n"
                        "Clic: cambia una zona de hueco a material o al revés (útil si una línea que no es "
@@ -237,6 +276,7 @@ class ContourDialog(QDialog):
         sl.setContentsMargins(0, 0, 0, 0)
         sl.addWidget(self.b_create)
         sl.addWidget(b_clear)
+        sl.addWidget(self.b_holes)
         sl.addWidget(QLabel("Piezas creadas (doble clic para renombrar):"))
         sl.addWidget(self.list, 1)
         sl.addWidget(b_del)
@@ -280,8 +320,9 @@ class ContourDialog(QDialog):
         return poly
 
     # --- carga -----------------------------------------------------------------
-    def _loaded(self, faces, warnings):
+    def _loaded(self, faces, warnings, polylines=None):
         self.faces = faces
+        self._polylines = polylines or {}
         self.page_combo.blockSignals(True)
         for pg in sorted(faces):
             self.page_combo.addItem(f"{pg} ({len(faces[pg])} contornos)", pg)
@@ -294,6 +335,10 @@ class ContourDialog(QDialog):
         self._page_changed()
 
     def _page_changed(self, *_):
+        if self.edge_mode:
+            self.page = self.page_combo.currentData()
+            self._draw_edges()
+            return
         self.page = self.page_combo.currentData()
         self.selected = set()
         faces = self.faces.get(self.page, [])
@@ -317,6 +362,9 @@ class ContourDialog(QDialog):
 
     # --- selección ---------------------------------------------------------------
     def _repaint(self):
+        if self.edge_mode:
+            self._repaint_edges()
+            return
         used = self.used.get(self.page, {})
         faces = self.faces.get(self.page, [])
         for i, it in self._items.items():
@@ -337,7 +385,10 @@ class ContourDialog(QDialog):
         self.selected = {i for i in sel if i not in self.used.get(self.page, {})}
         self._repaint()
 
-    def _clicked(self, x, y, same_shape: bool = False):
+    def _clicked(self, x, y, same_shape: bool = False, ctrl: bool = False):
+        if self.edge_mode:
+            self._edge_click(x, y, same_shape, ctrl)
+            return
         if self._tree is None:
             return
         faces = self.faces[self.page]
@@ -375,6 +426,12 @@ class ContourDialog(QDialog):
         return out
 
     def _band(self, x0, y0, x1, y1, window, remove):
+        if self.edge_mode:
+            ss = self._strokeset()
+            if ss is not None:
+                hit = set(ss.in_rect(x0, y0, x1, y1, window))
+                self._set_edge_selection(self.sel_edges - hit if remove else self.sel_edges | hit)
+            return
         if self._tree is None:
             return
         faces = self.faces[self.page]
@@ -410,7 +467,12 @@ class ContourDialog(QDialog):
         return f"{base}_{k}"
 
     def create_part(self):
-        if not self.selected or not self._ready_to_create():
+        if not self._ready_to_create():
+            return
+        if self.edge_mode:
+            self._create_from_edges()
+            return
+        if not self.selected:
             return
         faces = self.faces[self.page]
         merged = unary_union([faces[i] for i in sorted(self.selected)])
@@ -437,6 +499,224 @@ class ContourDialog(QDialog):
             self.used[self.page][i] = self.parts[-1].name
         self.selected = set()
         self._repaint()
+
+    # --- modo aristas ------------------------------------------------------------------
+    HELP_ZONES = None   # se rellena con el texto inicial de la ayuda
+
+    def _mode_changed(self, *_):
+        self.edge_mode = bool(self.by_combo.currentData())
+        self.selected = set()
+        self.sel_edges = set()
+        self.b_holes.setVisible(self.edge_mode)
+        if self.HELP_ZONES is None:
+            type(self).HELP_ZONES = self.help.text()
+        self.help.setText(EDGE_HELP if self.edge_mode else self.HELP_ZONES)
+        self._page_changed()
+
+    def _strokeset(self) -> StrokeSet | None:
+        if self.page is None or self.page not in self._polylines:
+            return None
+        if self.page not in self._strokes:
+            self._strokes[self.page] = StrokeSet(self._polylines[self.page], self.opts)
+        return self._strokes[self.page]
+
+    def _draw_edges(self):
+        sc = self.view.scene()
+        sc.clear()
+        self._items = {}
+        self._preview = None
+        self._open_marks = []
+        ss = self._strokeset()
+        self.used_edges.setdefault(self.page, {})
+        if ss is None:
+            self.info.setText("Este archivo no tiene aristas que elegir.")
+            return
+        for i, st in enumerate(ss.strokes):
+            path = QPainterPath()
+            pts = st.pts
+            path.moveTo(pts[0][0], -pts[0][1])
+            for x, y in pts[1:]:
+                path.lineTo(x, -y)
+            it = sc.addPath(path, _pen("#707070", 0.8))
+            it.setZValue(1)
+            self._items[i] = it
+        allpts = np.vstack([st.pts for st in ss.strokes])
+        minx, miny = allpts.min(axis=0)
+        maxx, maxy = allpts.max(axis=0)
+        pad = 0.02 * max(maxx - minx, maxy - miny, 1)
+        sc.setSceneRect(QRectF(minx - pad, -maxy - pad, maxx - minx + 2 * pad, maxy - miny + 2 * pad))
+        self._repaint_edges()
+        self.view.fit()
+
+    def _repaint_edges(self):
+        ss = self._strokeset()
+        if ss is None:
+            return
+        used = self.used_edges.get(self.page, {})
+        for i, it in self._items.items():
+            if i in self.sel_edges:
+                it.setPen(_pen("#0050d0", 2.5))
+            elif i in used:
+                it.setPen(_pen("#2a8a4a", 2))
+            else:
+                it.setPen(_pen("#707070", 0.8))
+        sc = self.view.scene()
+        if getattr(self, "_preview", None) is not None:
+            sc.removeItem(self._preview)
+            self._preview = None
+        for m in getattr(self, "_open_marks", []):
+            sc.removeItem(m)
+        self._open_marks = []
+        piece = ""
+        if self.sel_edges:
+            polys = ss.parts_from(sorted(self.sel_edges))
+            if polys:
+                path = QPainterPath()
+                path.setFillRule(Qt.FillRule.OddEvenFill)
+                for p in polys:
+                    path.addPath(polygon_path(p))
+                self._preview = sc.addPath(path, _pen("#0050d0", 0), QBrush(FILL_SELECTED))
+                self._preview.setZValue(0)
+                b = polys[0].bounds
+                piece = (f" · pieza {fmt(b[2] - b[0])} × {fmt(b[3] - b[1])} con {len(polys[0].interiors)} huecos"
+                         + (f" (+{len(polys) - 1} sueltas)" if len(polys) > 1 else ""))
+            ends = ss.open_ends(sorted(self.sel_edges))
+            r = 4 / (abs(self.view.transform().m11()) or 1)
+            for x, y in ends[:200]:
+                m = sc.addEllipse(QRectF(x - r, -y - r, 2 * r, 2 * r), _pen("#d00000", 1.5))
+                m.setZValue(3)
+                self._open_marks.append(m)
+            if ends and not polys:
+                piece = f" · NO CIERRA: {len(ends)} extremos sueltos (en rojo)"
+        self.info.setText(f"{len(ss)} aristas · {len(self.sel_edges)} elegidas · {len(used)} ya usadas{piece}"
+                          + (f" · {self._hover_text}" if self._hover_text else ""))
+        self._update_buttons()
+
+    def _set_edge_selection(self, sel: set[int]):
+        used = self.used_edges.get(self.page, {})
+        self.sel_edges = {i for i in sel if i not in used}
+        self._repaint_edges()
+
+    def _clear_selection(self):
+        if self.edge_mode:
+            self._set_edge_selection(set())
+        else:
+            self._set_selection(set())
+
+    def _hover_tol(self) -> float:
+        return 5 / (abs(self.view.transform().m11()) or 1)
+
+    def _hovered(self, x, y):
+        if not self.edge_mode:
+            return
+        ss = self._strokeset()
+        i = ss.nearest(x, y, self._hover_tol()) if ss else None
+        text = ""
+        if i is not None:
+            st = ss.strokes[i]
+            circle = ss.circle_of_stroke(i)
+            text = (f"círculo Ø{fmt(circle.diameter, 2)} mm" if circle and st.kind != "circulo" else st.describe())
+        if text != self._hover_text:
+            self._hover_text = text
+            self._repaint_edges()
+
+    def _edge_click(self, x, y, shift: bool, ctrl: bool):
+        ss = self._strokeset()
+        if ss is None:
+            return
+        i = ss.nearest(x, y, self._hover_tol())
+        if i is None:
+            return
+        if shift and ss.circle_of_stroke(i) is not None:
+            group = {k for c in ss.same_diameter(i) for k in c.strokes}
+        elif ctrl:
+            group = {i}
+        else:
+            group = set(ss.chain(i))
+            circle = ss.circle_of_stroke(i)
+            if circle is not None:
+                group |= set(circle.strokes)
+        if i in self.sel_edges:
+            self._set_edge_selection(self.sel_edges - group)
+        else:
+            self._set_edge_selection(self.sel_edges | group)
+
+    def add_holes(self):
+        ss = self._strokeset()
+        if ss is None or not self.sel_edges:
+            QMessageBox.information(self, "Taladros", "Elige primero el contorno exterior de la pieza.")
+            return
+        outer = ss.outer_of(sorted(self.sel_edges))
+        if outer is None:
+            QMessageBox.information(self, "Taladros", "Las aristas elegidas todavía no cierran un contorno.")
+            return
+        cands = [c for c in ss.circles_inside(outer) if not set(c.strokes) <= self.sel_edges]
+        if not cands:
+            QMessageBox.information(self, "Taladros", "No hay más círculos completos dentro del contorno.")
+            return
+        groups: list[list] = []
+        for c in sorted(cands, key=lambda c: c.radius):
+            if groups and abs(groups[-1][0].radius - c.radius) <= max(0.02, 0.002 * c.radius):
+                groups[-1].append(c)
+            else:
+                groups.append([c])
+        chosen = self._choose_holes(groups)
+        if chosen is None:
+            return
+        add = {k for g in chosen for c in g for k in c.strokes}
+        self._set_edge_selection(self.sel_edges | add)
+
+    def _choose_holes(self, groups):
+        """Diálogo con una casilla por diámetro (todas marcadas). None = cancelar."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Taladros dentro del contorno")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("Círculos completos dentro del contorno elegido:"))
+        checks = []
+        for g in groups:
+            c = QCheckBox(f"Ø{fmt(g[0].diameter, 2)} mm  × {len(g)}")
+            c.setChecked(True)
+            lay.addWidget(c)
+            checks.append(c)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return [g for g, c in zip(groups, checks) if c.isChecked()]
+
+    def _create_from_edges(self):
+        ss = self._strokeset()
+        if ss is None or not self.sel_edges:
+            return
+        polys = ss.parts_from(sorted(self.sel_edges))
+        if not polys:
+            n = len(ss.open_ends(sorted(self.sel_edges)))
+            QMessageBox.information(self, "Seleccionar aristas",
+                                    f"Las aristas elegidas no cierran ningún contorno: hay {n} extremos sueltos "
+                                    "(en rojo). Añade el tramo que falta (Ctrl+clic elige una sola arista).")
+            return
+        if len(polys) > 1:
+            choice = self._confirm_many(len(polys))
+            if choice is None:
+                return
+            if choice == "largest":
+                polys = polys[:1]
+        group = len(self.parts)
+        for poly in polys:
+            name = self._next_name()
+            self.parts.append(Part(name=name, shape=self._finalize_poly(poly), source=str(self.file), page=self.page,
+                                   extra={"edges": sorted(self.sel_edges), "group": group}))
+            item = QListWidgetItem(name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+            item.setData(Qt.ItemDataRole.UserRole, len(self.parts) - 1)
+            self.list.addItem(item)
+        used = self.used_edges.setdefault(self.page, {})
+        for i in self.sel_edges:
+            used[i] = self.parts[-1].name
+        self.sel_edges = set()
+        self._repaint_edges()
 
     def _confirm_many(self, n: int) -> str | None:
         """"all", "largest" o None (cancelar)."""
@@ -478,6 +758,9 @@ class ContourDialog(QDialog):
         used = self.used.get(p.page, {})
         for i in p.extra.get("faces", []):
             used.pop(i, None)
+        used_e = self.used_edges.get(p.page, {})
+        for i in p.extra.get("edges", []):
+            used_e.pop(i, None)
         group = p.extra.get("group")
         for row in reversed(range(self.list.count())):
             j = self.list.item(row).data(Qt.ItemDataRole.UserRole)
@@ -489,11 +772,12 @@ class ContourDialog(QDialog):
 
     def result_parts(self) -> list[Part]:
         """Copias de las piezas creadas, sin los datos internos del diálogo."""
-        return [replace(p, extra={k: v for k, v in p.extra.items() if k not in ("faces", "group")})
+        return [replace(p, extra={k: v for k, v in p.extra.items() if k not in ("faces", "edges", "group")})
                 for p in self.parts if p is not None]
 
     def _update_buttons(self):
-        self.b_create.setEnabled(bool(self.selected) and self._ready_to_create())
+        has = bool(self.sel_edges) if self.edge_mode else bool(self.selected)
+        self.b_create.setEnabled(has and self._ready_to_create())
         n = len([p for p in self.parts if p is not None])
         ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setText(f"Importar {n} pieza(s)")

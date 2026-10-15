@@ -20,7 +20,7 @@ La v1 cubre el flujo completo, desde el PDF hasta el DXF de corte, con edición 
 - Importar PDF vectorial (también multipágina) y DXF.
 - Importar imágenes: capturas de pantalla y escaneos (PNG, JPG, BMP, TIFF), vectorizando con OpenCV (ampliación del 15/10/2026).
 - Reconstruir automáticamente contornos y huecos.
-- Seleccionar a mano los contornos en planos con varias vistas.
+- Seleccionar a mano los contornos en planos con varias vistas: por zonas o por aristas (ampliación del 15/10/2026).
 - Pestaña Piezas: escala manual o por acotado, cantidad, y rotación y espejo por pieza.
 - Parámetros por proyecto y perfiles de material reutilizables.
 - Nesting con spyrrow en una o varias planchas.
@@ -74,6 +74,18 @@ El importador convierte los trazos sueltos de un PDF o DXF en piezas cerradas, c
 **DXF**
 
 - Se lee con ezdxf. **Aún no probado con archivos reales de CAD**; hay que comprobar unidades, arcos y polilíneas.
+
+**Selección por aristas y reconocimiento de elementos** (acordado el 15/10/2026)
+
+En planos con cotas, ejes y referencias, la selección por zonas se confunde: esas líneas parten la pieza. Por eso se puede definir la pieza eligiendo aristas.
+
+- Cada trazo del PDF o entidad del DXF se reconoce como recta, arco, círculo o polilínea, con centro y Ø ajustados (los taladros de las juntas ajustan con < 0,001 mm de residuo).
+- Clic: el contorno continuo (cadena de aristas unidas por sus extremos; se corta en las bifurcaciones); Ctrl+clic: una arista; Mayús+clic en un círculo: todos los del mismo Ø; ventana: añadir aristas.
+- «Taladros…»: lista los círculos completos dentro del contorno elegido, por diámetros, para añadirlos de una vez.
+- La pieza se cierra solo con las aristas elegidas: las cotas y ejes que la crucen no cuentan. Se marcan en rojo los extremos que no cierran.
+- No es automático decidir qué arista es corte cuando un plano dibuja escalones o avellanados con el mismo grosor de línea: lo elige el usuario.
+- En imágenes, solo la selección por zonas (reconocer aristas en píxeles no es fiable).
+- El filtro por grosor o tipo de línea se comprobó viable (en el plano RIG23P0054 las cotas van a 0,08 mm y las aristas a 0,35 mm) pero no se ha incluido.
 
 **Imágenes (capturas de pantalla y escaneos)**
 
@@ -167,7 +179,7 @@ Fijar piezas y recalcular el resto queda para la v2.
 
 ## Salidas
 
-**DXF de corte**, una plancha por archivo: capa CORTE (contornos y huecos en mm), capa PLANCHA (borde, opcional), capa ETIQUETAS (desactivada por defecto). Capas, unidades y formato de curvas a ajustar según el proveedor (pendiente).
+**DXF de corte**, una plancha por archivo. Curvas en segmentos (por defecto) o, como opción, con arcos y círculos reales ajustados con una desviación ≤ 0,05 mm (CIRCLE y LWPOLYLINE con abombamiento); a confirmar con el proveedor qué acepta su máquina: capa CORTE (contornos y huecos en mm), capa PLANCHA (borde, opcional), capa ETIQUETAS (desactivada por defecto). Capas, unidades y formato de curvas a ajustar según el proveedor (pendiente).
 
 **PDF de taller**: dibujo de cada plancha a escala con piezas numeradas; tabla de piezas (nombre, cantidad, plancha); material, espesor, separación, margen, % de aprovechamiento y retal libre.
 
@@ -235,3 +247,4 @@ Nesting en plancha 1200 × 1000 mm, margen 5 mm, 30 s:
 4. **Producción**: PDF de taller, varias planchas en la interfaz, perfiles de material, guardar y abrir proyectos.
 5. **Ampliaciones**: importador DXF con archivos reales, selección manual de contornos, ejecutable de Windows.
 6. **Imágenes** (añadida el 15/10/2026): capturas de pantalla y escaneos con OpenCV.
+7. **Aristas** (añadida el 15/10/2026): selección por aristas, reconocimiento de círculos y arcos, taladros por diámetro y DXF con arcos como opción.

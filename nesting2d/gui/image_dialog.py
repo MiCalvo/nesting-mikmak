@@ -45,6 +45,9 @@ class ImageContourDialog(ContourDialog):
     def __init__(self, file: str, opts: ImportOptions, parent=None):
         super().__init__(file, opts, None, parent, load=False)
         self.setWindowTitle(f"Seleccionar contornos en imagen — {self.stem}")
+        # en imágenes solo el modo por zonas (reconocer aristas en píxeles no es fiable)
+        self.by_label.hide()
+        self.by_combo.hide()
         self.img = load_image(file)
         self._pixmap_item = None
         auto = otsu_threshold(self.img.gray)

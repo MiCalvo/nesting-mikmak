@@ -18,6 +18,7 @@ cambiar comportamiento o alcance.
 ## Estado actual
 Fases 1 a 5 HECHAS y probadas por Mikel en Windows ("parece que funciona bien").
 Fase 6 (imágenes: capturas y escaneos con OpenCV) HECHA, sin probar aún por Mikel.
+Fase 7 (selección por aristas, círculos/arcos, taladros, DXF con arcos) HECHA, sin probar aún por Mikel.
 `python -m pytest` → todas en verde (las de interfaz, sin pantalla; se saltan si
 no está PySide6). Pendiente: DXF reales de su CAD.
 
@@ -29,13 +30,17 @@ nesting2d/
   importers/pdf_import.py  PDF vectorial (pdfplumber)
   importers/image_import.py  imágenes (Pillow + OpenCV): modos líneas/silueta/silueta clara,
                          umbral Otsu, caras en píxeles con Y hacia arriba
+  importers/strokes.py   aristas: recta/arco/círculo/polilínea, cadenas por extremos, círculos
+                         completos (también arcos que suman 360°), piezas con solo lo elegido
   importers/dxf_import.py  DXF (ezdxf): bloques anidados/MINSERT, capa 0 heredada, capas
                          — probado con DXF sintéticos; FALTAN DXF reales del CAD
   engine/params.py       NestParams (parámetros de proyecto)
   engine/part_in_part.py relleno voraz de huecos antes del motor
   engine/nester.py       capa sobre spyrrow: márgenes, lado de compactación, varias planchas
   validate.py            solapes, separación, margen (lo usará la edición manual)
-  exporters/dxf_export.py  DXF por plancha: capas CORTE, PLANCHA, ETIQUETAS (off por defecto)
+  exporters/dxf_export.py  DXF por plancha: capas CORTE, PLANCHA, ETIQUETAS (off por defecto);
+                         opción arcs=True (menú Archivo, `nest --arcos`)
+  exporters/arcs.py      ajuste de arcos/círculos a anillos (≤ 0,05 mm) -> CIRCLE / LWPOLYLINE bulge
   exporters/preview.py   PNG de comprobación (matplotlib, solo desarrollo)
   exporters/shop_pdf.py  PDF de taller con QPdfWriter (resumen + una página por plancha a
                          escala normalizada, piezas numeradas por posición, retal libre)
@@ -58,7 +63,8 @@ nesting2d/
                          con enganche, flechas, panel X/Y/ángulo, QUndoStack, validación en vivo
   gui/workers.py         QThreads de importación y de nesting (trabajan sobre copias)
   gui/gc_guard.py        recolección de basura solo en el hilo principal (ver abajo)
-  gui/contour_dialog.py  selección manual de contornos ("lo azul es la pieza") y capas DXF
+  gui/contour_dialog.py  selección manual de contornos ("lo azul es la pieza") por zonas o por
+                         aristas (cadena, Ctrl, Mayús = mismo Ø, Taladros…), y capas DXF
   gui/image_dialog.py    el mismo diálogo para imágenes: tipo, umbral, escala (ppp o medir)
 packaging/               PyInstaller: nesting2d.spec, lanzadores, construir_windows.bat
 .github/workflows/windows.yml  pruebas + ejecutable + autoprueba en Windows en cada push
@@ -128,6 +134,20 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
     124,0 × 72,7);
   - Otsu se adapta a líneas grises suavizadas (167–219); un umbral fijo de 128 las
     pierde. En imágenes de dos tonos puros Otsu da 0, y da igual.
+- Aristas (fase 7), medido con los datos de prueba:
+  - un polígono regular tiene todos sus vértices sobre su circunferencia
+    circunscrita (un rectángulo pasaba por círculo): un trazo solo es círculo/arco
+    si además ningún segmento abarca más de 25° (las Bézier de los PDF salen en
+    ≥ 4 segmentos por cuarto: ≤ 22,5°). Comprobar puntos medios NO sirve;
+  - NumPy 2.5: `np.cross` con vectores 2D da error; se calcula a mano;
+  - RIGCCP0019 por aristas (1 cadena + 15 círculos) = misma pieza que por zonas;
+  - plano A0 pág. 2: 3.789 trazos clasificados en < 1 s; el anillo de Ø340 con
+    el agujero de Ø220 y 15 taladros sale con 1 clic + «Taladros…»;
+  - empates al pinchar (recta que toca un círculo): se prefiere círculo/arco.
+- Arcos para el DXF: empezar el recorrido del anillo al principio del segmento
+  más largo (si no, un arco queda partido al cerrar) y parar los tramos rectos
+  donde empieza un arco (si no, se comen su primer punto). Con eso las esquinas
+  de R salen de 90° exactos (rectángulo redondeado: área exacta).
 - Ejecutable: PyInstaller en modo carpeta (dist/Nesting2D: Nesting2D.exe ventana +
   nesting2d-cli.exe consola). Construido y probado en Linux (≈300 MB; la
   autoprueba pasa con spyrrow empaquetado). En Windows lo construye Actions.
@@ -173,6 +193,9 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
    de contornos; ejecutable de Windows con PyInstaller y autoprueba.
 6. ~~Imágenes~~ (hecha, 15/10/2026, a petición de Mikel): capturas de pantalla y
    escaneos con OpenCV; fotos con perspectiva, por ahora no.
+7. ~~Aristas~~ (hecha, 15/10/2026, a petición de Mikel): selección por aristas y
+   reconocimiento de círculos/arcos; DXF con arcos como opción. Mikel NO eligió el
+   filtro por grosor/tipo de línea (comprobado viable; posible mejora).
 
 ## Pendientes abiertos
 - Separación y margen reales: los dirá el proveedor de la mica.

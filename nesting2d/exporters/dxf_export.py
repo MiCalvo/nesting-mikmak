@@ -6,9 +6,10 @@ Capas:
 - ETIQUETAS: nombre de cada pieza (desactivada por defecto para que el texto no
   acabe cortado).
 
-PENDIENTE (ver especificación): ajustar capas, unidades y formato de curvas
-(arcos o polilíneas) a lo que pida el proveedor. Ahora las curvas salen como
-polilíneas de segmentos de ≤ 0,5 mm.
+Curvas: por defecto, polilíneas de segmentos de ≤ 0,5 mm (como siempre). Con
+`arcs=True` se ajustan arcos y círculos (ver arcs.py): CIRCLE para los anillos
+circulares y LWPOLYLINE con abombamiento (bulge) para el resto, sin desviarse
+más de `arc_tol` mm. PENDIENTE: confirmar con el proveedor qué acepta su máquina.
 """
 from __future__ import annotations
 
@@ -18,12 +19,14 @@ import ezdxf
 from ezdxf import units
 
 from ..engine.nester import Layout
+from .arcs import DEFAULT_TOL, ring_circle, ring_to_bulges
 
 LAYER_CUT, LAYER_SHEET, LAYER_LABELS = "CORTE", "PLANCHA", "ETIQUETAS"
 
 
 def export_sheet(layout: Layout, sheet: int, path: str | Path,
-                 sheet_border: bool = True, labels: bool = False) -> Path:
+                 sheet_border: bool = True, labels: bool = False,
+                 arcs: bool = False, arc_tol: float = DEFAULT_TOL) -> Path:
     path = Path(path)
     doc = ezdxf.new("R2010", setup=False)
     doc.units = units.MM
@@ -33,8 +36,16 @@ def export_sheet(layout: Layout, sheet: int, path: str | Path,
 
     for pl in layout.on_sheet(sheet):
         for ring in [pl.polygon.exterior, *pl.polygon.interiors]:
-            pts = list(ring.coords)[:-1]
-            msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": LAYER_CUT})
+            coords = list(ring.coords)
+            if arcs:
+                circle = ring_circle(coords, arc_tol)
+                if circle is not None:
+                    msp.add_circle(circle[0], circle[1], dxfattribs={"layer": LAYER_CUT})
+                else:
+                    msp.add_lwpolyline(ring_to_bulges(coords, arc_tol), format="xyb", close=True,
+                                       dxfattribs={"layer": LAYER_CUT})
+            else:
+                msp.add_lwpolyline(coords[:-1], close=True, dxfattribs={"layer": LAYER_CUT})
 
     if sheet_border:
         doc.layers.add(LAYER_SHEET, color=8)

@@ -72,6 +72,10 @@ def run(report: str | Path | None = None) -> int:
             back = import_dxf(dxf, layers=["CORTE"])
             log(f"DXF: exportado y reimportado, {len(back.parts)} piezas")
             ok &= len(back.parts) == len(layout.on_sheet(0))
+            dxf_a = export_sheet(layout, 0, tmp / "p1_arcos.dxf", arcs=True)
+            back_a = import_dxf(dxf_a, layers=["CORTE"])
+            log(f"DXF con arcos: reimportado, {len(back_a.parts)} piezas")
+            ok &= len(back_a.parts) == len(layout.on_sheet(0))
 
             from .exporters.shop_pdf import export_shop_pdf
             pdf = export_shop_pdf(layout, parts, tmp / "taller.pdf", title="Autoprueba")

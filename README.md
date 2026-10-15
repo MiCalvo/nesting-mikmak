@@ -52,6 +52,12 @@ python -m nesting2d gui
    huecos), un clic cambia una zona de hueco a material o al revés, y
    Mayús+clic hace ese cambio en todas las zonas iguales (por ejemplo, todos
    los taladros).
+   En planos con cotas y ejes, elige **Seleccionar por: Aristas**: clic en una
+   arista elige su contorno continuo (o el círculo), Ctrl+clic una sola arista,
+   Mayús+clic en un círculo todos los del mismo Ø, y **Taladros…** añade los
+   círculos de dentro del contorno por diámetros. Al pasar el ratón se ve si es
+   recta, arco o círculo y su Ø. Las cotas y ejes no cuentan si no los eliges;
+   en rojo, los extremos que no cierran.
    **Imágenes** (capturas de pantalla y escaneos: PNG, JPG, BMP, TIFF): se abre
    ese mismo diálogo con el tipo de imagen (dibujo de líneas o silueta), el
    umbral de blanco y negro y la **escala**, que es obligatoria: sale sola de
@@ -80,7 +86,8 @@ python -m nesting2d gui
    - «A la plancha»: pasa la selección a otra plancha o a una nueva;
      «Eliminar planchas vacías».
 6. **Exportar DXF…** (Ctrl+E): `plancha_1.dxf`, `plancha_2.dxf`… en la carpeta
-   que elijas. **Exportar PDF de taller…** (Ctrl+P): resumen con la tabla de
+   que elijas. Archivo → «DXF con arcos y círculos» los escribe con arcos reales
+   (desviación ≤ 0,05 mm) en vez de segmentos; por defecto, segmentos. **Exportar PDF de taller…** (Ctrl+P): resumen con la tabla de
    piezas y una página por plancha a escala, con cada pieza numerada.
    **Guardar** (Ctrl+S) crea el proyecto `.json` (con el resultado del motor y
    tus ediciones). Archivo → Abrir reciente; también puedes arrastrar PDF, DXF o

@@ -128,6 +128,12 @@ class MainWindow(QMainWindow):
                                "Resumen + una página por plancha, a escala y con las piezas numeradas")
         self.a_labels = QAction("Incluir nombres en el DXF (capa ETIQUETAS)", self)
         self.a_labels.setCheckable(True)
+        self.a_arcs = QAction("DXF con arcos y círculos (en vez de segmentos)", self)
+        self.a_arcs.setCheckable(True)
+        self.a_arcs.setStatusTip("Ajusta arcos y círculos a los contornos (desviación ≤ 0,05 mm). "
+                                 "Por defecto, segmentos, hasta saber qué acepta la máquina del proveedor.")
+        self.a_arcs.setChecked(QSettings().value("dxf/arcs", False, type=bool))
+        self.a_arcs.toggled.connect(lambda on: QSettings().setValue("dxf/arcs", on))
         self.a_quit = self._act("&Salir", self.close, K.Quit)
         self.a_nest = self._act("&Calcular", self.start_nest, "F5", "Calcular el nesting")
         self.a_stop = self._act("&Detener", self.stop_nest, None,
@@ -140,7 +146,7 @@ class MainWindow(QMainWindow):
         self.recent_menu = m.addMenu("Abrir &reciente")
         self.recent_menu.aboutToShow.connect(self._fill_recent_menu)
         for a in (self.a_save, self.a_save_as, None, self.a_import, self.a_import_manual, None,
-                  self.a_export, self.a_labels, self.a_pdf, None, self.a_quit):
+                  self.a_export, self.a_labels, self.a_arcs, self.a_pdf, None, self.a_quit):
             m.addSeparator() if a is None else m.addAction(a)
         m = self.menuBar().addMenu("&Editar")
         self.a_undo = self.result_panel.undo.createUndoAction(self, "&Deshacer")
@@ -633,7 +639,7 @@ class MainWindow(QMainWindow):
                 return
         try:
             for s, f in enumerate(files):
-                export_sheet(L, s, f, labels=self.a_labels.isChecked())
+                export_sheet(L, s, f, labels=self.a_labels.isChecked(), arcs=self.a_arcs.isChecked())
         except OSError as e:
             self._warn(f"No se pudo escribir el DXF: {e}")
             return

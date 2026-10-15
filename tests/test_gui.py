@@ -649,3 +649,75 @@ def test_window_imports_image_through_dialog(qapp, window, monkeypatch, tmp_path
     (p,) = w.model.parts
     assert p.name == "plano_1" and p.quantity == 1
     assert p.size == pytest.approx((100, 60), abs=0.15)
+
+
+# --- selección por aristas ---------------------------------------------------------------
+def _plate_with_dims_dxf(path):
+    """Placa 100×60 con taladro Ø20, un eje que cruza el taladro y una 'cota' que cruza la placa."""
+    import ezdxf
+    doc = ezdxf.new("R2010")
+    doc.units = 4
+    m = doc.modelspace()
+    m.add_lwpolyline([(0, 0), (100, 0), (100, 60), (0, 60)], close=True)
+    m.add_circle((50, 30), 10)
+    m.add_line((30, 30), (70, 30))
+    m.add_line((-10, 45), (110, 45))
+    doc.saveas(path)
+    return path
+
+
+def test_edges_mode_chain_plus_holes(qapp, tmp_path, monkeypatch):
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    dlg = ContourDialog(str(_plate_with_dims_dxf(tmp_path / "p.dxf")), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    # por zonas, la "cota" parte la placa en dos zonas de material
+    assert len(dlg.faces[1]) > 3
+    dlg.by_combo.setCurrentIndex(dlg.by_combo.findData(True))
+    assert dlg.edge_mode and dlg.b_holes.isVisible() is not None
+    qapp.processEvents()
+    dlg._hovered(60, 30.2)                       # sobre el taladro
+    assert "Ø20" in dlg._hover_text
+    dlg._clicked(100, 20)                        # clic en el lado derecho de la placa: cadena = contorno
+    assert len(dlg.sel_edges) == 1
+    monkeypatch.setattr(dlg, "_choose_holes", lambda groups: groups)
+    dlg.add_holes()
+    assert len(dlg.sel_edges) == 2               # contorno + taladro; ni el eje ni la cota
+    dlg.create_part()
+    (p,) = dlg.result_parts()
+    assert p.size == pytest.approx((100, 60))
+    assert len(p.shape.interiors) == 1
+    assert p.area == pytest.approx(6000 - 3.14159 * 100, rel=1e-3)
+    dlg.reject()
+
+
+def test_edges_mode_open_selection_is_reported(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    dlg = ContourDialog(str(_plate_with_dims_dxf(tmp_path / "p.dxf")), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    dlg.by_combo.setCurrentIndex(dlg.by_combo.findData(True))
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+    dlg._clicked(50, 45, False, True)            # Ctrl+clic: solo la línea de la "cota"
+    assert len(dlg.sel_edges) == 1
+    assert "NO CIERRA" in dlg.info.text()
+    dlg.create_part()
+    assert dlg.result_parts() == [] and "no cierran" in shown[0]
+    dlg.reject()
+
+
+def test_edges_mode_shift_click_same_diameter_on_real_gasket(qapp):
+    from nesting2d.gui.contour_dialog import ContourDialog
+    from nesting2d.importers.contours import ImportOptions
+    dlg = ContourDialog(str(DATA / "RIGCCP0019.pdf"), ImportOptions())
+    wait_until(qapp, lambda: dlg.faces)
+    dlg.by_combo.setCurrentIndex(dlg.by_combo.findData(True))
+    ss = dlg._strokeset()
+    c = ss.circles[0]
+    x, y = c.center[0] + c.radius, c.center[1]
+    dlg._clicked(x, y, True, False)              # Mayús+clic en un taladro de Ø4,49
+    assert len(dlg.sel_edges) == 15
+    dlg.reject()

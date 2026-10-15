@@ -23,7 +23,10 @@ def main(argv: list[str] | None = None) -> int:
     win.show()
     if len(argv) > 1:
         win.open_project(argv[1])
-    return app.exec()
+    code = app.exec()
+    del win
+    gc_guard.shutdown(app)
+    return code
 
 
 if __name__ == "__main__":

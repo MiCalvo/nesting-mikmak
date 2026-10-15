@@ -101,6 +101,11 @@ datos_prueba/            5 PDFs de juntas (A4, 1:1) + un plano A0 con varias vis
   segmentation fault (visto en las pruebas al importar el plano A0). Por eso
   `gui/gc_guard.install(app)` desactiva el GC automático y lo lanza con un QTimer
   en el hilo principal. Cualquier QApplication nueva (pruebas incluidas) debe llamarlo.
+  Y al terminar, `gc_guard.shutdown(app)` (lo hacen app.main y el fixture de las
+  pruebas): con el GC desactivado, los ciclos con objetos de Qt se destruían al
+  salir de Python, ya sin QApplication → segmentation fault (código 139) DESPUÉS
+  de pasar todas las pruebas. Comprobar siempre el código de salida de pytest, no
+  solo "N passed".
 - Interfaz: Y hacia arriba en los datos; las escenas de Qt dibujan en (x, −y).
 - `Layout.stats()["free"]` = retal desde un margen más allá de la última pieza
   hasta el borde de la plancha, a todo su ancho. `nester.free_rect` da esa misma

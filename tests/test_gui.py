@@ -33,6 +33,7 @@ def qapp():
     app.setApplicationName("pruebas")
     yield app
     QSettings().clear()
+    gc_guard.shutdown(app)    # sin esto, Python puede caerse al terminar (visto: código 139)
 
 
 def wait_until(app, cond, timeout=60):

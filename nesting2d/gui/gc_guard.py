@@ -45,3 +45,18 @@ def install(app: QObject, interval_ms: int = 500) -> None:
     global _guard
     if _guard is None:
         _guard = _MainThreadGC(app, interval_ms)
+
+
+def shutdown(app) -> None:
+    """Cierre ordenado: destruir las ventanas que queden y recoger los ciclos MIENTRAS
+    Qt sigue vivo. Si no, con el GC automático desactivado, Python los destruye al
+    terminar, cuando la QApplication ya no existe, y puede caerse (visto en las
+    pruebas: segmentation fault al salir, tras pasar todas)."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+    for w in QApplication.topLevelWidgets():
+        w.close()
+        w.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    gc.collect()
